@@ -1921,7 +1921,7 @@ loadstring(game:HttpGet(('https://pastefy.app/Te4dwSw2/raw'),true))()
 Section9:Button({
    Text = "Pendulum Hub (TROLL) ",
    Callback = function()
-loadstring(game:HttpGet('https://rawscripts.net/raw/Universal-Script-Chat-bypasser-check-desc-16930'))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Tescalus/Pendulum-Hubs-Source/main/Pendulum%20Hub%20V5.lua"))()
    end
 })
 
