@@ -2017,7 +2017,28 @@ end)
 Section9:Button({
    Text = "Invisable",
    Callback = function()
-loadstring(game:HttpGet('https://pastebin.com/raw/AYtzGEPb'))()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/0Ben1/fe./dbb6ce6f6cee4f7a5c9e20d7b88e83db2a93bf25/Invisible%20GUI'))()
+   end
+})
+
+Section9:Button({
+   Text = "Script Maker",
+   Callback = function()
+loadstring(game:HttpGet('https://pastefy.app/S7xNJSXX/raw'))()execute("Script8")
+   end
+})
+
+Section9:Button({
+   Text = "AutoFling Player",
+   Callback = function()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/GhostPlayer352/Test4/main/Auto%20Fling%20Player'))()
+   end
+})
+
+Section9:Button({
+   Text = "Cannon Ball",
+   Callback = function()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/GhostPlayer352/Test4/main/Cannon%20Ball'))()
    end
 })
 
@@ -2025,6 +2046,20 @@ Section9:Button({
    Text = "Backflip",
    Callback = function()
 loadstring(game:HttpGet('https://pastebin.com/raw/yjxXnxbS'))()
+   end
+})
+
+Section9:Button({
+   Text = "Fly Car",
+   Callback = function()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/GhostPlayer352/Test4/main/Vehicle%20Fly%20Gui'))()
+   end
+})
+
+Section9:Button({
+   Text = "NoFall (HIGHT) ",
+   Callback = function()
+loadstring(game:HttpGet('https://pastefy.app/S7xNJSXX/raw'))()execute("Script1")
    end
 })
 
@@ -2095,6 +2130,13 @@ Section9:Button({
    Text = "BTOOL",
    Callback = function()
 loadstring(game:GetObjects("rbxassetid://6695644299")[1].Source)()
+   end
+})
+
+Section9:Button({
+   Text = "Void",
+   Callback = function()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/GhostPlayer352/Test4/main/Void'))()
    end
 })
 
