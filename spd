@@ -1,0 +1,3708 @@
+--[[
+	============================================================================================
+	PROJECT SPIDER-MAN — PROFESSIONAL REALISTIC SUPERPOWERS SYSTEM (MASSIVELY UPGRADED EDITION)
+	============================================================================================
+	SCRIPT TYPE : LocalScript (SINGLE SCRIPT ONLY)
+	LOCATION    : StarterPlayer -> StarterPlayerScripts -> SpiderManSystem
+	RIG SUPPORT : R15 & R6 (Universal Dynamic Detection + Anti-Ragdoll / Upright Stabilizer)
+	PLATFORMS   : PC (Keyboard & Mouse) + Mobile / Tablet (Lower-Right Circular Icon-Only HUD)
+	============================================================================================
+	UPGRADES & FEATURES INCLUDED:
+	1. Interactive Spider-Tech Settings Tab ([P] or ⚙️ HUD Button):
+	   - Building Detection (ON / OFF): Toggle between smart 32-ray architectural building
+	     attachment vs. unrestricted free-air sky swinging anywhere.
+	   - Front Flipping While Swinging (ON / OFF): Toggle automatic 360-degree acrobatic front
+	     flips on swing release & mid-swing flip maneuvers.
+	   - Strict Building Mode (ON / OFF): Require real buildings to swing (disables sky fallback).
+	   - 3D Building Anchor Reticle (ON / OFF): Live lock-on indicator on valid building points.
+	   - Dynamic Camera FX (ON / OFF): Speed FOV warp, pendulum bank roll, & impact shake.
+	   - Auto Spider-Sense (ON / OFF): Automatic danger detection halo & counter window.
+	2. Custom Web Zip Animation Integration:
+	   - Uses local WEB_ZIP_ANIM = "rbxassetid://100103306715371" at Action4 priority for
+	     high-speed Web Zips, Chain Air Zips, Point Launches, and Web Strike gap-closers.
+	3. Balanced Slightly-Fast Pendulum Web Swinging ([LeftShift] / [RightShift] / [E]):
+	   - Natural pendulum arc physics (MaxTerminalSwingSpeed = 104), ground-skim wake VFX,
+	     catenary-to-taut web strand dynamics, and apex weightlessness.
+	4. Realistic 3D Wall & Ceiling Crawling ([C]) & Motorized Web Hanging ([T]):
+	   - Universal WASD/Thumbstick 3D surface tangent solver, inside/outside corner wrapping,
+	     rooftop ledge vaulting, motorized winch climb/rappel, and pendulum sway.
+	5. Complete Spider-Man Gadget, Combat & Bio-Electric Arsenal:
+	   - Web Shooters ([Q]), Web Pull ([G]), Web Bomb ([Z]), Venom Smash ([U]),
+	     Web Blossom ([H]), Overdrive Surge ([J]), Web Shield ([V]), Spider-Sense Dodge ([X]),
+	     Charged Super Jump ([Space]), Web Wings ([B]), Slingshot ([Y]), and 4-Hit Combat ([M]).
+	============================================================================================
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+------------------------------------------------------------------------------------------------
+-- CORE ASSET IDS (ANIMATIONS & SOUNDS)
+------------------------------------------------------------------------------------------------
+local WEB_SWING_ANIM = "rbxassetid://97674654492880"
+local WALL_CRAWL_ANIM = "rbxassetid://507765644"
+local WEB_HANG_ANIM  = "rbxassetid://125903067740797"
+local FLIP_ANIM      = "rbxassetid://6881270464"
+local LANDING_ANIM   = "rbxassetid://115526680245169"
+local WEB_ZIP_ANIM   = "rbxassetid://100103306715371"
+
+local SOUND_IDS = {
+	WEB_SHOOT     = "rbxassetid://1284846268",
+	WEB_SHOOT_ALT = "rbxassetid://9084017080",
+	WHOOSH        = "rbxassetid://137081214744553",
+	SWOOSH        = "rbxassetid://1127797047",
+	AIR_WIND      = "rbxassetid://2306939610",
+	IMPACT        = "rbxassetid://1275399688829015",
+	IMPACT_ALT    = "rbxassetid://127539968829015",
+}
+
+------------------------------------------------------------------------------------------------
+-- RUNTIME USER SETTINGS (CONTROLLED VIA SETTINGS TAB)
+------------------------------------------------------------------------------------------------
+local SETTINGS = {
+	BuildingDetection = true,     -- Toggle ON/OFF building raycast snapping when web swinging
+	SwingFrontFlip    = true,     -- Toggle ON/OFF 360° front flipping while/after web swinging
+	StrictBuildingOnly = false,   -- When ON (with BuildingDetection ON), requires real buildings to swing
+	WebTargetReticle  = true,     -- Show live 3D lock-on reticle on nearby building anchor points
+	DynamicCameraFX   = true,     -- Enable velocity FOV scaling, pendulum banking & camera shake
+	AutoSpiderSense   = true,     -- Enable automatic incoming threat sense & dodge reflex
+}
+
+------------------------------------------------------------------------------------------------
+-- MASTER CONFIGURATION TABLE
+------------------------------------------------------------------------------------------------
+local CONFIG = {
+	Animations = {
+		WebSwing  = WEB_SWING_ANIM,
+		WallCrawl = WALL_CRAWL_ANIM,
+		WebHang   = WEB_HANG_ANIM,
+		Flip      = FLIP_ANIM,
+		Landing   = LANDING_ANIM,
+		WebZip    = WEB_ZIP_ANIM,
+	},
+
+	Visuals = {
+		PrimaryColor   = Color3.fromRGB(215, 25, 45),
+		SecondaryColor = Color3.fromRGB(18, 42, 115),
+		AccentColor    = Color3.fromRGB(255, 255, 255),
+		WebColor       = Color3.fromRGB(246, 250, 255),
+		WebGlowColor   = Color3.fromRGB(210, 232, 255),
+		VenomColor     = Color3.fromRGB(255, 190, 35),
+		SenseColor     = Color3.fromRGB(255, 45, 65),
+		ReticleColor   = Color3.fromRGB(0, 230, 255),
+	},
+
+	-- 1. BALANCED SLIGHTLY-FAST PENDULUM WEB SWINGING
+	Swing = {
+		AllowFreeAirSwing          = true,
+		MaxRayDistance             = 320,
+		MinAnchorHeightAbovePlayer = 16,
+		IdealAnchorDistance        = 105,
+		ConeRays                   = 32,
+
+		-- Free-Air Sky Anchor (Leads velocity vector smoothly)
+		FreeAirBaseForwardOffset   = 58,
+		FreeAirSpeedLeadFactor     = 0.40,
+		FreeAirUpwardOffset        = 62,
+
+		-- Rope & Winch Mechanics
+		MinRopeLength              = 18,
+		MaxRopeLength              = 230,
+		ReelSpeed                  = 36,
+		GroundClearanceBuffer      = 7.5,
+		GroundSkimHeight           = 11.5,
+
+		-- Ground-to-Swing Vault Impulse
+		GroundVaultUpImpulse       = 32,
+		GroundVaultForwardImpulse  = 20,
+
+		-- Balanced Slightly-Fast Pendulum Physics
+		GravityMultiplierDownswing = 1.18,
+		DiveMomentumConversion     = 1.08,
+		TangentialDriveForce       = 2650,
+		BottomArcWhipBoost         = 1550,
+		UpswingMomentumAssist      = 1250,
+		OmnidirectionalSteerForce  = 2500,
+		VelocityCarveTurnRate      = 3.6,
+		AirResistanceCoeff         = 0.022,
+		MaxTerminalSwingSpeed      = 104,
+
+		-- Release Vault
+		ReleaseMomentumMultiplier  = 1.03,
+		ReleaseForwardImpulse      = 14,
+		ReleaseUpwardImpulse       = 22,
+	},
+
+	-- 2. REALISTIC 3D WALL & CEILING CRAWLING
+	Crawl = {
+		DetectionDistance  = 6.8,
+		SnapDistance       = 35.0,
+		CrawlSpeed         = 28,
+		WallRunSpeed       = 50,
+		AdhesionPullSpeed  = 12,
+		NormalLerpSpeed    = 16,
+		CornerRayOffset    = 2.6,
+		CornerWrapDistance = 7.5,
+		LedgeBoostUp       = 36,
+		LedgeBoostForward  = 24,
+		WallJumpUp         = 56,
+		WallJumpAway       = 44,
+	},
+
+	-- 3. WEB ZIP & POINT LAUNCH (WITH CUSTOM WEB_ZIP_ANIM)
+	WebZip = {
+		MaxDistance           = 215,
+		ZipSpeed              = 130,
+		AirZipDistance        = 76,
+		ArrivalThreshold      = 10,
+		Cooldown              = 0.60,
+		MaxAirChainZips       = 3,
+		PointLaunchWindow     = 0.48,
+		PointLaunchUp         = 66,
+		PointLaunchForward    = 82,
+	},
+
+	-- 4. SLINGSHOT LAUNCH
+	Slingshot = {
+		MaxChargeTime         = 1.5,
+		MinLaunchSpeed        = 82,
+		MaxLaunchSpeed        = 162,
+		UpwardLift            = 48,
+		AnchorSpread          = 26,
+		AnchorForwardDistance = 125,
+	},
+
+	-- 5. WEB SHOOTERS & GADGETS
+	Gadgets = {
+		MaxWebFluid           = 100,
+		FluidRegenRate        = 15,
+		WebShotCost           = 5,
+		WebShotSpeed          = 245,
+		WebShotRange          = 270,
+		WebShotImpulse        = 68,
+		WebPullCost           = 14,
+		WebPullRange          = 145,
+		WebPullForce          = 118,
+		WebBombCost           = 26,
+		WebBombRadius         = 28,
+		WebBombForce          = 95,
+		WebShieldCostPerSec   = 14,
+	},
+
+	-- 6. BIO-ELECTRIC VENOM & ULTIMATES
+	Ultimates = {
+		VenomSmashCooldown    = 7.5,
+		VenomSmashRadius      = 34,
+		VenomSmashForce       = 115,
+		WebBlossomCooldown    = 11.0,
+		WebBlossomRays        = 20,
+		WebBlossomRadius      = 48,
+		SurgeCooldown         = 22.0,
+		SurgeDuration         = 12.0,
+		SurgeSpeedMultiplier  = 1.25,
+	},
+
+	-- 7. SPIDER-SENSE & ACROBATICS
+	SpiderSense = {
+		ScanRadius            = 58,
+		ProjectileSpeedThresh = 24,
+		DodgeSpeed            = 88,
+		DodgeDuration         = 0.30,
+		DodgeCooldown         = 0.60,
+		SlowMoScale           = 0.35,
+	},
+
+	-- 8. CHARGED SUPER JUMP, DOUBLE JUMP & LANDING
+	Jump = {
+		MaxChargeTime                = 1.15,
+		BaseJumpPower                = 52,
+		MaxChargedJumpPower          = 122,
+		DoubleJumpUp                 = 60,
+		DoubleJumpForward            = 30,
+		LandingAnimVelocityThreshold = -46,
+		HardLandingVelocityThreshold = -92,
+	},
+
+	-- 9. REALISTIC MOTORIZED PENDULUM WEB HANG
+	WebHang = {
+		MaxCeilingDistance           = 190,
+		DefaultSkyCeilingHeight      = 68,
+		MinHangLength                = 6,
+		MaxHangLength                = 165,
+		ClimbSpeed                   = 30,
+		SwayForce                    = 1650,
+		HorizontalDamping            = 3.5,
+		MinGroundClearanceWhenHanging = 14,
+		AutoLiftSpeed                = 34,
+	},
+
+	-- 10. WEB WINGS GLIDING
+	WebWings = {
+		ForwardGlideSpeed     = 90,
+		DescentRate           = -11.5,
+		PitchSensitivity      = 42,
+		TurnLerp              = 6.8,
+	},
+
+	-- 11. ACROBATIC MELEE COMBAT & WEB STRIKE
+	Combat = {
+		ComboResetTime        = 1.25,
+		HitRange              = 12.5,
+		WebStrikeRange        = 95,
+		WebStrikeSpeed        = 145,
+		KnockbackForce        = 65,
+		FinisherKnockback     = 115,
+		AttackCooldown        = 0.25,
+	},
+
+	-- 12. CAMERA & ATMOSPHERIC DYNAMICS
+	Camera = {
+		BaseFOV               = 70,
+		MaxFOV                = 96,
+		FOVLerpSpeed          = 7.5,
+		MaxRollAngle          = 10,
+		RollLerpSpeed         = 8.5,
+	},
+
+	-- 13. PC KEYBINDS
+	Keybinds = {
+		Swing       = Enum.KeyCode.LeftShift,
+		SwingAlt    = Enum.KeyCode.RightShift,
+		SwingExtra  = Enum.KeyCode.E,
+		Crawl       = Enum.KeyCode.C,
+		WebZip      = Enum.KeyCode.F,
+		Slingshot   = Enum.KeyCode.Y,
+		WebShoot    = Enum.KeyCode.Q,
+		WebPull     = Enum.KeyCode.G,
+		WebBomb     = Enum.KeyCode.Z,
+		WebShield   = Enum.KeyCode.V,
+		VenomSmash  = Enum.KeyCode.U,
+		WebBlossom  = Enum.KeyCode.H,
+		SurgeMode   = Enum.KeyCode.J,
+		SpiderSense = Enum.KeyCode.X,
+		Acrobatics  = Enum.KeyCode.R,
+		WebHang     = Enum.KeyCode.T,
+		WebWings    = Enum.KeyCode.B,
+		Combat      = Enum.KeyCode.M,
+		SuperJump   = Enum.KeyCode.Space,
+		Settings    = Enum.KeyCode.P,
+		CancelAll   = Enum.KeyCode.Backspace,
+	},
+}
+
+------------------------------------------------------------------------------------------------
+-- STATE MANAGEMENT
+------------------------------------------------------------------------------------------------
+local Character = nil
+local Humanoid = nil
+local RootPart = nil
+local Animator = nil
+local IsR15 = true
+
+local Limbs = {
+	Head      = nil,
+	Torso     = nil,
+	RightArm  = nil,
+	LeftArm   = nil,
+	RightLeg  = nil,
+	LeftLeg   = nil,
+	RightHand = nil,
+	LeftHand  = nil,
+}
+
+local State = {
+	IsSwinging        = false,
+	IsCrawling        = false,
+	IsWebZipping      = false,
+	IsChargingSling   = false,
+	IsChargingJump    = false,
+	IsHanging         = false,
+	IsGliding         = false,
+	IsShielding       = false,
+	IsDodging         = false,
+	IsVenomSmashing   = false,
+	IsBlossoming      = false,
+	IsSurgeActive     = false,
+	IsAttacking       = false,
+	IsFlipping        = false,
+	IsSettingsOpen    = false,
+
+	ActiveHand        = "Right",
+	SwingAnchorPos    = Vector3.zero,
+	SwingStartTime    = 0,
+	CurrentRopeLength = 0,
+	IsBuildingAnchor  = false,
+
+	CrawlNormal       = Vector3.yAxis,
+	CrawlSurfacePos   = Vector3.zero,
+
+	HangAnchorPos     = Vector3.zero,
+	HangLength        = 30,
+
+	WebFluid          = CONFIG.Gadgets.MaxWebFluid,
+	ComboStep         = 1,
+	LastCombatTime    = 0,
+	AirZipCount       = 0,
+
+	CanDoubleJump     = false,
+	HasDoubleJumped   = false,
+	PointLaunchReady  = false,
+	PointLaunchExpire = 0,
+
+	SlingChargeStart  = 0,
+	JumpChargeStart   = 0,
+
+	DangerDetected    = false,
+	ThreatPosition    = nil,
+	ThreatPart        = nil,
+
+	CurrentRoll       = 0,
+	ShakeIntensity    = 0,
+	LastVerticalSpeed = 0,
+	LastGroundSkimVFX = 0,
+}
+
+local Cooldowns = {
+	WebZip     = 0,
+	VenomSmash = 0,
+	WebBlossom = 0,
+	SurgeMode  = 0,
+	Dodge      = 0,
+	Combat     = 0,
+}
+
+local PhysicsObjects = {
+	RootAttachment        = nil,
+	TopHangAttachment     = nil,
+	RightWristAttachment  = nil,
+	LeftWristAttachment   = nil,
+	RightShooterModel     = nil,
+	LeftShooterModel      = nil,
+
+	SwingAnchorPart       = nil,
+	SwingAnchorAttachment = nil,
+	SwingRope             = nil,
+	SwingVectorForce      = nil,
+	SwingAlignOrientation = nil,
+	SwingWebBeamMain      = nil,
+	SwingWebBeamCore      = nil,
+
+	CrawlLinearVelocity   = nil,
+	CrawlAlignOrientation = nil,
+
+	HangAnchorPart        = nil,
+	HangAnchorAttachment  = nil,
+	HangRope              = nil,
+	HangVectorForce       = nil,
+	HangLinearVelocity    = nil,
+	HangAlignOrientation  = nil,
+	HangBeam              = nil,
+	HangWristBeam         = nil,
+
+	GlideLinearVelocity   = nil,
+	GlideAlignOrientation = nil,
+	LeftWingBeam          = nil,
+	RightWingBeam         = nil,
+
+	FlipAlignOrientation  = nil,
+
+	SlingshotLeftPart     = nil,
+	SlingshotRightPart    = nil,
+	SlingshotLeftBeam     = nil,
+	SlingshotRightBeam    = nil,
+
+	ShieldModel           = nil,
+	SurgeHighlight        = nil,
+	SymbioteTendrils      = {},
+	SpeedTrailLeft        = nil,
+	SpeedTrailRight       = nil,
+
+	AnchorReticlePart     = nil,
+	AnchorReticleGui      = nil,
+	AnchorReticleRing     = nil,
+}
+
+local AnimTracks = {
+	WebSwing  = nil,
+	WallCrawl = nil,
+	WebHang   = nil,
+	Flip      = nil,
+	Landing   = nil,
+	WebZip    = nil,
+}
+
+local Sounds = {}
+local Connections = {}
+local VFXFolder = nil
+
+local UI = {
+	ScreenGui      = nil,
+	FluidBarFill   = nil,
+	SpiderSenseGui = nil,
+	Buttons        = {},
+	SettingsPanel  = nil,
+	SettingToggles = {},
+}
+
+------------------------------------------------------------------------------------------------
+-- UTILITY & UNIVERSAL INPUT HELPERS
+------------------------------------------------------------------------------------------------
+local function clamp(val, minVal, maxVal)
+	return math.max(minVal, math.min(maxVal, val))
+end
+
+local function lerp(a, b, t)
+	return a + (b - a) * clamp(t, 0, 1)
+end
+
+local function safeUnit(v, fallback)
+	if v.Magnitude > 1e-4 then
+		return v.Unit
+	end
+	return fallback or Vector3.new(0, 0, -1)
+end
+
+local function getRayParams(extraIgnore)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local list = { Character, VFXFolder }
+	if extraIgnore then
+		for _, item in ipairs(extraIgnore) do
+			table.insert(list, item)
+		end
+	end
+	params.FilterDescendantsInstances = list
+	params.IgnoreWater = true
+	return params
+end
+
+local function isCooldownReady(name)
+	return (os.clock() - (Cooldowns[name] or 0)) >= 0
+end
+
+local function setCooldown(name, duration)
+	Cooldowns[name] = os.clock() + duration
+end
+
+local function consumeFluid(amount)
+	if State.IsSurgeActive then
+		return true
+	end
+	if State.WebFluid >= amount then
+		State.WebFluid = math.max(0, State.WebFluid - amount)
+		return true
+	end
+	return false
+end
+
+local function getRawInputAxes()
+	local forward = 0
+	local right = 0
+
+	if not UserInputService:GetFocusedTextBox() then
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up) then
+			forward = forward + 1
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) or UserInputService:IsKeyDown(Enum.KeyCode.Down) then
+			forward = forward - 1
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then
+			right = right + 1
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then
+			right = right - 1
+		end
+	end
+
+	if math.abs(forward) < 0.05 and math.abs(right) < 0.05 and Humanoid and Camera then
+		local moveDir = Humanoid.MoveDirection
+		if moveDir.Magnitude > 0.05 then
+			local camLook = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+			local camRight = safeUnit(Vector3.new(Camera.CFrame.RightVector.X, 0, Camera.CFrame.RightVector.Z), Vector3.xAxis)
+			forward = clamp(moveDir:Dot(camLook), -1, 1)
+			right = clamp(moveDir:Dot(camRight), -1, 1)
+		end
+	end
+
+	return forward, right
+end
+
+local function getWorldMoveDirection()
+	if Humanoid and Humanoid.MoveDirection.Magnitude > 0.05 then
+		return Humanoid.MoveDirection.Unit
+	end
+	local forward, right = getRawInputAxes()
+	if math.abs(forward) > 0.05 or math.abs(right) > 0.05 then
+		local camCF = Camera.CFrame
+		local camLook = safeUnit(Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z), Vector3.new(0, 0, -1))
+		local camRight = safeUnit(Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z), Vector3.xAxis)
+		return safeUnit(camLook * forward + camRight * right, camLook)
+	end
+	return Vector3.zero
+end
+
+local function isGrounded()
+	if not RootPart or not Humanoid then return false end
+	if Humanoid.FloorMaterial ~= Enum.Material.Air then
+		return true
+	end
+	local ray = Workspace:Raycast(RootPart.Position, Vector3.new(0, -4.6, 0), getRayParams())
+	return ray ~= nil
+end
+
+local function getCharacterMass()
+	if not Character then return 15 end
+	local total = 0
+	for _, d in ipairs(Character:GetDescendants()) do
+		if d:IsA("BasePart") and not d.Massless then
+			total = total + d:GetMass()
+		end
+	end
+	return math.max(total, 10)
+end
+
+local function addCameraShake(amount)
+	if not SETTINGS.DynamicCameraFX then return end
+	State.ShakeIntensity = math.max(State.ShakeIntensity, amount)
+end
+
+local function makeCharacterUpright()
+	if not RootPart or not Humanoid then return end
+	local flatLook = Vector3.new(RootPart.CFrame.LookVector.X, 0, RootPart.CFrame.LookVector.Z)
+	if flatLook.Magnitude < 0.05 and Camera then
+		flatLook = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z)
+	end
+	flatLook = safeUnit(flatLook, Vector3.new(0, 0, -1))
+	RootPart.CFrame = CFrame.lookAt(RootPart.Position, RootPart.Position + flatLook, Vector3.yAxis)
+	RootPart.AssemblyAngularVelocity = Vector3.zero
+	Humanoid.PlatformStand = false
+	Humanoid.AutoRotate = true
+end
+
+------------------------------------------------------------------------------------------------
+-- AUDIO SYSTEM
+------------------------------------------------------------------------------------------------
+local function setupSounds()
+	if not RootPart then return end
+
+	local function makeSound(name, id, volume, speed, looped)
+		local s = Instance.new("Sound")
+		s.Name = "SpiderSound_" .. name
+		s.SoundId = id
+		s.Volume = volume or 0.7
+		s.PlaybackSpeed = speed or 1.0
+		s.Looped = looped or false
+		s.RollOffMaxDistance = 150
+		s.RollOffMinDistance = 10
+		s.Parent = RootPart
+		Sounds[name] = s
+		return s
+	end
+
+	makeSound("WebShoot1", SOUND_IDS.WEB_SHOOT, 0.85, 1.0, false)
+	makeSound("WebShoot2", SOUND_IDS.WEB_SHOOT_ALT, 0.85, 1.0, false)
+	makeSound("Whoosh", SOUND_IDS.WHOOSH, 0.80, 1.0, false)
+	makeSound("Swoosh", SOUND_IDS.SWOOSH, 0.80, 1.0, false)
+	makeSound("AirWind", SOUND_IDS.AIR_WIND, 0.0, 1.0, true)
+	makeSound("Impact", SOUND_IDS.IMPACT, 0.90, 1.0, false)
+	makeSound("ImpactAlt", SOUND_IDS.IMPACT_ALT, 0.90, 1.0, false)
+
+	Sounds.AirWind:Play()
+end
+
+local function playWebSound(pitchShift)
+	local s = (math.random(1, 2) == 1) and Sounds.WebShoot1 or Sounds.WebShoot2
+	if s then
+		s.PlaybackSpeed = (pitchShift or 1.0) + (math.random(-7, 7) * 0.01)
+		s.TimePosition = 0
+		s:Play()
+	end
+end
+
+local function playWhooshSound(pitchShift)
+	local s = Sounds.Whoosh
+	if s then
+		s.PlaybackSpeed = (pitchShift or 1.0) + (math.random(-6, 6) * 0.01)
+		s.TimePosition = 0
+		s:Play()
+	end
+end
+
+local function playSwooshSound(pitchShift)
+	local s = Sounds.Swoosh
+	if s then
+		s.PlaybackSpeed = (pitchShift or 1.0) + (math.random(-6, 6) * 0.01)
+		s.TimePosition = 0
+		s:Play()
+	end
+end
+
+local function playImpactSound(pitchShift)
+	local s = Sounds.Impact
+	if s and s.IsLoaded then
+		s.PlaybackSpeed = (pitchShift or 1.0) + (math.random(-6, 6) * 0.01)
+		s.TimePosition = 0
+		s:Play()
+	elseif Sounds.ImpactAlt then
+		Sounds.ImpactAlt.PlaybackSpeed = (pitchShift or 1.0) + (math.random(-6, 6) * 0.01)
+		Sounds.ImpactAlt.TimePosition = 0
+		Sounds.ImpactAlt:Play()
+	end
+end
+
+------------------------------------------------------------------------------------------------
+-- ANIMATION TRACK LOADER (WITH WEB_ZIP_ANIM & LANDING_ANIM)
+------------------------------------------------------------------------------------------------
+local function loadCharacterAnimations()
+	if not Humanoid then return end
+	Animator = Humanoid:FindFirstChildOfClass("Animator")
+	if not Animator then
+		Animator = Instance.new("Animator")
+		Animator.Parent = Humanoid
+	end
+
+	local function loadTrack(animId, priority, looped)
+		if not animId or animId == "" then return nil end
+		local anim = Instance.new("Animation")
+		anim.AnimationId = animId
+		local ok, track = pcall(function()
+			return Animator:LoadAnimation(anim)
+		end)
+		if ok and track then
+			track.Priority = priority
+			track.Looped = looped
+			return track
+		end
+		return nil
+	end
+
+	AnimTracks.WebSwing  = loadTrack(CONFIG.Animations.WebSwing, Enum.AnimationPriority.Action3, true)
+	AnimTracks.WallCrawl = loadTrack(CONFIG.Animations.WallCrawl, Enum.AnimationPriority.Movement, true)
+	AnimTracks.WebHang   = loadTrack(CONFIG.Animations.WebHang, Enum.AnimationPriority.Action2, true)
+	AnimTracks.Flip      = loadTrack(CONFIG.Animations.Flip, Enum.AnimationPriority.Action4, false)
+	AnimTracks.Landing   = loadTrack(CONFIG.Animations.Landing, Enum.AnimationPriority.Action4, false)
+	AnimTracks.WebZip    = loadTrack(CONFIG.Animations.WebZip, Enum.AnimationPriority.Action4, false)
+end
+
+local function playAnim(name, fadeTime, speed)
+	local track = AnimTracks[name]
+	if track then
+		if not track.IsPlaying then
+			track:Play(fadeTime or 0.15, 1, speed or 1.0)
+		else
+			track:AdjustSpeed(speed or 1.0)
+		end
+	end
+end
+
+local function stopAnim(name, fadeTime)
+	local track = AnimTracks[name]
+	if track and track.IsPlaying then
+		track:Stop(fadeTime or 0.2)
+	end
+end
+
+local function playLandingAnimation()
+	local track = AnimTracks.Landing
+	if not track then return end
+	stopAnim("WebSwing", 0.08)
+	stopAnim("Flip", 0.08)
+	stopAnim("WebHang", 0.08)
+	stopAnim("WebZip", 0.08)
+	track:Play(0.05, 1, 1.05)
+
+	task.delay(0.65, function()
+		if track.IsPlaying and Humanoid and Humanoid.MoveDirection.Magnitude > 0.15 then
+			track:Stop(0.2)
+		end
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- 3D WEB SHOOTER CUFFS, SYMBIOTE TENDRILS, BEAMS & VFX BUILDERS
+------------------------------------------------------------------------------------------------
+local function ensureVFXFolder()
+	if VFXFolder and VFXFolder.Parent then
+		return VFXFolder
+	end
+	VFXFolder = Workspace:FindFirstChild("SpiderManVFX_" .. LocalPlayer.Name)
+	if not VFXFolder then
+		VFXFolder = Instance.new("Folder")
+		VFXFolder.Name = "SpiderManVFX_" .. LocalPlayer.Name
+		VFXFolder.Parent = Workspace
+	end
+	return VFXFolder
+end
+
+local function createWebTextureRing(numSegments)
+	local seq = {}
+	for i = 0, numSegments do
+		local t = i / numSegments
+		local width = (i % 2 == 0) and 1.0 or 0.65
+		table.insert(seq, NumberSequenceKeypoint.new(t, width))
+	end
+	return NumberSequence.new(seq)
+end
+
+local function createWebBeam(att0, att1, width0, width1, color)
+	local mainBeam = Instance.new("Beam")
+	mainBeam.Name = "SpiderWebMain"
+	mainBeam.Attachment0 = att0
+	mainBeam.Attachment1 = att1
+	mainBeam.Width0 = width0 or 0.18
+	mainBeam.Width1 = width1 or 0.12
+	mainBeam.Color = ColorSequence.new(color or CONFIG.Visuals.WebColor)
+	mainBeam.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(0.85, 0.02),
+		NumberSequenceKeypoint.new(1, 0.15),
+	})
+	mainBeam.LightEmission = 0.65
+	mainBeam.LightInfluence = 0.25
+	mainBeam.FaceCamera = true
+	mainBeam.Segments = 24
+	mainBeam.Parent = ensureVFXFolder()
+
+	local coreBeam = Instance.new("Beam")
+	coreBeam.Name = "SpiderWebCore"
+	coreBeam.Attachment0 = att0
+	coreBeam.Attachment1 = att1
+	coreBeam.Width0 = (width0 or 0.18) * 0.45
+	coreBeam.Width1 = (width1 or 0.12) * 0.45
+	coreBeam.Color = ColorSequence.new(CONFIG.Visuals.WebGlowColor)
+	coreBeam.Transparency = createWebTextureRing(8)
+	coreBeam.LightEmission = 0.9
+	coreBeam.FaceCamera = true
+	coreBeam.Segments = 24
+	coreBeam.CurveSize0 = 0.35
+	coreBeam.CurveSize1 = -0.35
+	coreBeam.Parent = mainBeam
+
+	return mainBeam, coreBeam
+end
+
+local function spawnWebNozzleFlash(wristAtt)
+	if not wristAtt then return end
+	local p = Instance.new("Part")
+	p.Name = "WebMuzzleFlash"
+	p.Size = Vector3.new(0.5, 0.5, 0.5)
+	p.Shape = Enum.PartType.Ball
+	p.Material = Enum.Material.Neon
+	p.Color = CONFIG.Visuals.WebGlowColor
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CFrame = CFrame.new(wristAtt.WorldPosition)
+	p.Parent = ensureVFXFolder()
+
+	TweenService:Create(p, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(1.85, 1.85, 1.85),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(p, 0.18)
+end
+
+local function spawnAnchorWebSplat(position, normal, isBuilding)
+	local splat = Instance.new("Part")
+	splat.Name = "WebSplat"
+	splat.Size = Vector3.new(0.2, 0.2, 0.08)
+	splat.Material = Enum.Material.Neon
+	splat.Color = isBuilding and CONFIG.Visuals.WebColor or CONFIG.Visuals.ReticleColor
+	splat.Transparency = 0.15
+	splat.Anchored = true
+	splat.CanCollide = false
+	splat.CanQuery = false
+	splat.CanTouch = false
+	local n = safeUnit(normal or Vector3.yAxis, Vector3.yAxis)
+	splat.CFrame = CFrame.lookAt(position + n * 0.05, position + n * 1.05)
+	splat.Parent = ensureVFXFolder()
+
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Scale = Vector3.new(1, 1, 0.2)
+	mesh.Parent = splat
+
+	TweenService:Create(splat, TweenInfo.new(0.14, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = Vector3.new(2.8, 2.8, 0.12),
+	}):Play()
+
+	task.delay(3.5, function()
+		if splat and splat.Parent then
+			TweenService:Create(splat, TweenInfo.new(0.6), { Transparency = 1 }):Play()
+			Debris:AddItem(splat, 0.65)
+		end
+	end)
+end
+
+local function spawnShockwaveRing(origin, normal, startRadius, endRadius, duration, color)
+	local ring = Instance.new("Part")
+	ring.Name = "ShockwaveRing"
+	ring.Size = Vector3.new(startRadius, 0.3, startRadius)
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = color or CONFIG.Visuals.WebGlowColor
+	ring.Transparency = 0.2
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+
+	local n = safeUnit(normal or Vector3.yAxis, Vector3.yAxis)
+	ring.CFrame = CFrame.lookAt(origin, origin + n) * CFrame.Angles(0, math.rad(90), 0)
+	ring.Parent = ensureVFXFolder()
+
+	TweenService:Create(ring, TweenInfo.new(duration or 0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.08, endRadius, endRadius),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(ring, (duration or 0.4) + 0.05)
+end
+
+local function spawnGroundSkimWake(groundPos, groundNormal, moveDir)
+	if os.clock() - State.LastGroundSkimVFX < 0.06 then return end
+	State.LastGroundSkimVFX = os.clock()
+
+	local wake = Instance.new("Part")
+	wake.Name = "GroundSkimWake"
+	wake.Size = Vector3.new(1.5, 0.15, 3.2)
+	wake.Material = Enum.Material.Neon
+	wake.Color = CONFIG.Visuals.WebGlowColor
+	wake.Transparency = 0.4
+	wake.Anchored = true
+	wake.CanCollide = false
+	wake.CanQuery = false
+	wake.CanTouch = false
+	local n = safeUnit(groundNormal, Vector3.yAxis)
+	local f = safeUnit(moveDir - n * moveDir:Dot(n), Vector3.new(0, 0, -1))
+	wake.CFrame = CFrame.lookAt(groundPos + n * 0.12, groundPos + n * 0.12 + f, n)
+	wake.Parent = ensureVFXFolder()
+
+	TweenService:Create(wake, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(5.2, 0.05, 6.8),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(wake, 0.35)
+end
+
+local function spawnLightningArc(p0, p1, color, thickness, duration)
+	local dist = (p1 - p0).Magnitude
+	local segments = math.clamp(math.floor(dist / 3.5), 3, 12)
+	local prev = p0
+	local dir = safeUnit(p1 - p0, Vector3.yAxis)
+
+	for i = 1, segments do
+		local alpha = i / segments
+		local nextPos = p0:Lerp(p1, alpha)
+		if i < segments then
+			local jitter = Vector3.new(
+				(math.random() - 0.5) * 2.4,
+				(math.random() - 0.5) * 2.4,
+				(math.random() - 0.5) * 2.4
+			)
+			jitter = jitter - dir * jitter:Dot(dir)
+			nextPos = nextPos + jitter
+		end
+
+		local segLen = (nextPos - prev).Magnitude
+		local bolt = Instance.new("Part")
+		bolt.Name = "BioArc"
+		bolt.Size = Vector3.new(thickness or 0.22, thickness or 0.22, segLen)
+		bolt.Material = Enum.Material.Neon
+		bolt.Color = color or CONFIG.Visuals.VenomColor
+		bolt.Anchored = true
+		bolt.CanCollide = false
+		bolt.CanQuery = false
+		bolt.CanTouch = false
+		bolt.CFrame = CFrame.lookAt((prev + nextPos) * 0.5, nextPos)
+		bolt.Parent = ensureVFXFolder()
+
+		TweenService:Create(bolt, TweenInfo.new(duration or 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(0.02, 0.02, segLen),
+		}):Play()
+		Debris:AddItem(bolt, (duration or 0.22) + 0.04)
+
+		prev = nextPos
+	end
+end
+
+local function create3DWebShooter(limb, isRight)
+	if not limb then return nil, nil end
+
+	local model = Instance.new("Model")
+	model.Name = isRight and "RightWebShooter" or "LeftWebShooter"
+	model.Parent = Character
+
+	local cuff = Instance.new("Part")
+	cuff.Name = "ShooterCuff"
+	cuff.Size = Vector3.new(1.06, 0.24, 1.06)
+	cuff.Material = Enum.Material.Metal
+	cuff.Color = Color3.fromRGB(30, 34, 42)
+	cuff.CanCollide = false
+	cuff.CanQuery = false
+	cuff.CanTouch = false
+	cuff.Massless = true
+	cuff.Parent = model
+
+	local weld = Instance.new("Weld")
+	weld.Part0 = limb
+	weld.Part1 = cuff
+	weld.C0 = CFrame.new(0, -0.38, 0)
+	weld.Parent = cuff
+
+	local nozzle = Instance.new("Part")
+	nozzle.Name = "ShooterNozzle"
+	nozzle.Size = Vector3.new(0.24, 0.28, 0.24)
+	nozzle.Material = Enum.Material.Neon
+	nozzle.Color = CONFIG.Visuals.PrimaryColor
+	nozzle.CanCollide = false
+	nozzle.CanQuery = false
+	nozzle.CanTouch = false
+	nozzle.Massless = true
+	nozzle.Parent = model
+
+	local nWeld = Instance.new("Weld")
+	nWeld.Part0 = cuff
+	nWeld.Part1 = nozzle
+	nWeld.C0 = CFrame.new(0, -0.06, -0.54)
+	nWeld.Parent = nozzle
+
+	local att = Instance.new("Attachment")
+	att.Name = isRight and "RightWristWebAttachment" or "LeftWristWebAttachment"
+	att.Position = Vector3.new(0, -0.45, -0.25)
+	att.Parent = limb
+
+	local trailAtt0 = Instance.new("Attachment")
+	trailAtt0.Position = Vector3.new(0, -0.3, -0.2)
+	trailAtt0.Parent = limb
+	local trailAtt1 = Instance.new("Attachment")
+	trailAtt1.Position = Vector3.new(0, -0.55, 0.2)
+	trailAtt1.Parent = limb
+
+	local speedTrail = Instance.new("Trail")
+	speedTrail.Attachment0 = trailAtt0
+	speedTrail.Attachment1 = trailAtt1
+	speedTrail.Lifetime = 0.22
+	speedTrail.MinLength = 0.1
+	speedTrail.FaceCamera = true
+	speedTrail.LightEmission = 0.8
+	speedTrail.Color = ColorSequence.new(CONFIG.Visuals.WebGlowColor)
+	speedTrail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.45),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	speedTrail.Enabled = false
+	speedTrail.Parent = limb
+
+	if isRight then
+		PhysicsObjects.SpeedTrailRight = speedTrail
+	else
+		PhysicsObjects.SpeedTrailLeft = speedTrail
+	end
+
+	return model, att
+end
+
+local function createAnchorReticle()
+	if PhysicsObjects.AnchorReticlePart then
+		PhysicsObjects.AnchorReticlePart:Destroy()
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "SpiderWebAnchorReticle"
+	part.Size = Vector3.new(0.5, 0.5, 0.5)
+	part.Transparency = 1
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Parent = ensureVFXFolder()
+
+	local bbg = Instance.new("BillboardGui")
+	bbg.Name = "ReticleBillboard"
+	bbg.Size = UDim2.new(0, 38, 0, 38)
+	bbg.AlwaysOnTop = true
+	bbg.Enabled = false
+	bbg.Parent = part
+
+	local outerRing = Instance.new("Frame")
+	outerRing.Size = UDim2.new(1, 0, 1, 0)
+	outerRing.BackgroundTransparency = 1
+	outerRing.Parent = bbg
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = outerRing
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2.2
+	stroke.Color = CONFIG.Visuals.ReticleColor
+	stroke.Transparency = 0.15
+	stroke.Parent = outerRing
+
+	local centerDot = Instance.new("Frame")
+	centerDot.Size = UDim2.new(0, 8, 0, 8)
+	centerDot.Position = UDim2.new(0.5, -4, 0.5, -4)
+	centerDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	centerDot.BorderSizePixel = 0
+	centerDot.Parent = outerRing
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1, 0)
+	dotCorner.Parent = centerDot
+
+	PhysicsObjects.AnchorReticlePart = part
+	PhysicsObjects.AnchorReticleGui = bbg
+	PhysicsObjects.AnchorReticleRing = outerRing
+end
+
+------------------------------------------------------------------------------------------------
+-- FULL-BODY 360-DEGREE FLIP ROTATION (NO PROCEDURAL LIMB OVERRIDES)
+------------------------------------------------------------------------------------------------
+local function stopBodyFlip()
+	State.IsFlipping = false
+	if PhysicsObjects.FlipAlignOrientation then
+		PhysicsObjects.FlipAlignOrientation.Enabled = false
+	end
+	stopAnim("Flip", 0.15)
+end
+
+local function performBodyFlip(flipStyle)
+	if not RootPart or not Humanoid then return end
+	if State.IsCrawling or State.IsHanging or State.IsGliding then return end
+
+	State.IsFlipping = true
+	playAnim("Flip", 0.05, 1.35)
+	playSwooshSound(1.15)
+
+	local align = PhysicsObjects.FlipAlignOrientation
+	if not align then
+		align = Instance.new("AlignOrientation")
+		align.Name = "SpiderFlipAlign"
+		align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		align.Attachment0 = PhysicsObjects.RootAttachment
+		align.RigidityEnabled = false
+		align.MaxTorque = 950000
+		align.Responsiveness = 55
+		align.Enabled = false
+		align.Parent = RootPart
+		PhysicsObjects.FlipAlignOrientation = align
+	end
+
+	local vel = RootPart.AssemblyLinearVelocity
+	local flatLook = Vector3.new(vel.X, 0, vel.Z)
+	if flatLook.Magnitude < 4 then
+		flatLook = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z)
+	end
+	flatLook = safeUnit(flatLook, Vector3.new(0, 0, -1))
+	local baseCF = CFrame.lookAt(Vector3.zero, flatLook, Vector3.yAxis)
+
+	Humanoid.AutoRotate = false
+	align.CFrame = baseCF
+	align.Enabled = true
+
+	local spinRing = Instance.new("Part")
+	spinRing.Name = "FlipAirRing"
+	spinRing.Size = Vector3.new(4.5, 0.25, 4.5)
+	spinRing.Shape = Enum.PartType.Cylinder
+	spinRing.Material = Enum.Material.Neon
+	spinRing.Color = CONFIG.Visuals.WebGlowColor
+	spinRing.Transparency = 0.45
+	spinRing.Anchored = true
+	spinRing.CanCollide = false
+	spinRing.CanQuery = false
+	spinRing.CanTouch = false
+	spinRing.CFrame = RootPart.CFrame * CFrame.Angles(0, 0, math.rad(90))
+	spinRing.Parent = ensureVFXFolder()
+
+	TweenService:Create(spinRing, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.05, 9.5, 9.5),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(spinRing, 0.45)
+
+	local duration = 0.44
+	local startTime = os.clock()
+	local style = flipStyle or "Front"
+
+	task.spawn(function()
+		while State.IsFlipping and (os.clock() - startTime) < duration do
+			if not RootPart or not RootPart.Parent then break end
+			if State.IsSwinging or State.IsCrawling or State.IsHanging or State.IsGliding or State.IsWebZipping then
+				break
+			end
+			local alpha = clamp((os.clock() - startTime) / duration, 0, 1)
+			local angle = alpha * math.pi * 2
+
+			local currentVel = RootPart.AssemblyLinearVelocity
+			local curFlat = Vector3.new(currentVel.X, 0, currentVel.Z)
+			if curFlat.Magnitude > 5 then
+				baseCF = CFrame.lookAt(Vector3.zero, curFlat.Unit, Vector3.yAxis)
+			end
+
+			if style == "Front" then
+				align.CFrame = baseCF * CFrame.Angles(-angle, 0, 0)
+			elseif style == "Back" then
+				align.CFrame = baseCF * CFrame.Angles(angle, 0, 0)
+			elseif style == "SideRight" then
+				align.CFrame = baseCF * CFrame.Angles(0, 0, -angle)
+			elseif style == "SideLeft" then
+				align.CFrame = baseCF * CFrame.Angles(0, 0, angle)
+			else
+				align.CFrame = baseCF * CFrame.Angles(-angle, 0, angle)
+			end
+
+			RunService.RenderStepped:Wait()
+		end
+
+		if align then
+			align.CFrame = baseCF
+			align.Enabled = false
+		end
+		State.IsFlipping = false
+		if not State.IsSwinging and not State.IsCrawling and not State.IsHanging and not State.IsGliding then
+			makeCharacterUpright()
+		end
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 1: BALANCED SLIGHTLY-FAST PENDULUM WEB SWINGING (WITH BUILDING DETECTION SETTING)
+------------------------------------------------------------------------------------------------
+local function findBestSwingAnchor(previewOnly)
+	if not RootPart then return nil, nil, false end
+
+	local origin = RootPart.Position
+	local vel = RootPart.AssemblyLinearVelocity
+	local flatVel = Vector3.new(vel.X, 0, vel.Z)
+	local camLook = Camera.CFrame.LookVector
+	local flatCam = safeUnit(Vector3.new(camLook.X, 0, camLook.Z), Vector3.new(0, 0, -1))
+
+	local forwardDir = (flatVel.Magnitude > 14) and safeUnit(flatVel:Lerp(flatCam * flatVel.Magnitude, 0.45), flatCam) or flatCam
+	local rightDir = forwardDir:Cross(Vector3.yAxis)
+	local params = getRayParams()
+
+	local bestPos = nil
+	local bestNormal = Vector3.yAxis
+	local bestScore = -math.huge
+	local isBuilding = false
+
+	-- CHECK SETTING: Building Detection ON vs OFF
+	if SETTINGS.BuildingDetection then
+		-- 1. Direct Camera Look Raycast (if aiming above horizon at a building)
+		if camLook.Y > 0.06 then
+			local lookHit = Workspace:Raycast(origin, camLook * CONFIG.Swing.MaxRayDistance, params)
+			if lookHit and lookHit.Position.Y > (origin.Y + CONFIG.Swing.MinAnchorHeightAbovePlayer) then
+				local dist = (lookHit.Position - origin).Magnitude
+				if dist >= 22 and dist <= CONFIG.Swing.MaxRayDistance then
+					bestPos = lookHit.Position
+					bestNormal = lookHit.Normal
+					bestScore = 175 - math.abs(dist - CONFIG.Swing.IdealAnchorDistance) * 0.45
+					isBuilding = true
+				end
+			end
+		end
+
+		-- 2. 32-Ray Smart Architectural Cone Search
+		local numRays = CONFIG.Swing.ConeRays
+		for i = 1, numRays do
+			local frac = (i - 1) / (numRays - 1)
+			local yaw = (frac - 0.5) * math.rad(130)
+			local pitch = math.rad(22 + (i % 4) * 14)
+
+			local horizontal = (forwardDir * math.cos(yaw) + rightDir * math.sin(yaw)).Unit
+			local rayDir = (horizontal * math.cos(pitch) + Vector3.yAxis * math.sin(pitch)).Unit
+
+			local hit = Workspace:Raycast(origin, rayDir * CONFIG.Swing.MaxRayDistance, params)
+			if hit then
+				local hitPos = hit.Position
+				local heightGain = hitPos.Y - origin.Y
+				local dist = (hitPos - origin).Magnitude
+				local forwardAdvance = (hitPos - origin):Dot(forwardDir)
+
+				if heightGain >= CONFIG.Swing.MinAnchorHeightAbovePlayer and forwardAdvance > 8 and dist >= 22 then
+					local distPenalty = math.abs(dist - CONFIG.Swing.IdealAnchorDistance) * 0.55
+					local heightBonus = math.min(heightGain, 110) * 0.72
+					local forwardBonus = math.min(forwardAdvance, 125) * 0.65
+					local wallBonus = (math.abs(hit.Normal.Y) < 0.4) and 22 or 0
+					local score = heightBonus + forwardBonus + wallBonus - distPenalty
+
+					if score > bestScore then
+						bestScore = score
+						bestPos = hitPos
+						bestNormal = hit.Normal
+						isBuilding = true
+					end
+				end
+			end
+		end
+	end
+
+	-- 3. Free-Air Sky Anchor (Used when BuildingDetection is OFF, or as fallback when no buildings hit)
+	if not bestPos and not previewOnly then
+		if not SETTINGS.BuildingDetection or (not SETTINGS.StrictBuildingOnly and CONFIG.Swing.AllowFreeAirSwing) then
+			local speedLead = clamp(flatVel.Magnitude * CONFIG.Swing.FreeAirSpeedLeadFactor, 0, 56)
+			local forwardOffset = CONFIG.Swing.FreeAirBaseForwardOffset + speedLead
+			bestPos = origin + (forwardDir * forwardOffset) + Vector3.new(0, CONFIG.Swing.FreeAirUpwardOffset, 0)
+			bestNormal = -forwardDir
+			isBuilding = false
+		end
+	end
+
+	return bestPos, bestNormal, isBuilding
+end
+
+local function updateBuildingAnchorReticle()
+	local bbg = PhysicsObjects.AnchorReticleGui
+	local part = PhysicsObjects.AnchorReticlePart
+	local ring = PhysicsObjects.AnchorReticleRing
+	if not bbg or not part or not ring then return end
+
+	if not SETTINGS.BuildingDetection or not SETTINGS.WebTargetReticle or State.IsSwinging or State.IsCrawling or State.IsHanging or State.IsGliding then
+		bbg.Enabled = false
+		return
+	end
+
+	local anchorPos, _, isBuilding = findBestSwingAnchor(true)
+	if anchorPos and isBuilding then
+		part.Position = anchorPos
+		bbg.Enabled = true
+		local pulse = 1 + math.sin(os.clock() * 8) * 0.14
+		ring.Size = UDim2.new(pulse, 0, pulse, 0)
+		ring.Position = UDim2.new(0.5 * (1 - pulse), 0, 0.5 * (1 - pulse), 0)
+	else
+		bbg.Enabled = false
+	end
+end
+
+local function stopSwing(applyVault)
+	if not State.IsSwinging then return end
+	State.IsSwinging = false
+
+	stopAnim("WebSwing", 0.2)
+
+	if PhysicsObjects.SwingRope then
+		PhysicsObjects.SwingRope.Enabled = false
+	end
+	if PhysicsObjects.SwingVectorForce then
+		PhysicsObjects.SwingVectorForce.Enabled = false
+		PhysicsObjects.SwingVectorForce.Force = Vector3.zero
+	end
+	if PhysicsObjects.SwingAlignOrientation then
+		PhysicsObjects.SwingAlignOrientation.Enabled = false
+	end
+	if PhysicsObjects.SwingWebBeamMain then
+		PhysicsObjects.SwingWebBeamMain:Destroy()
+		PhysicsObjects.SwingWebBeamMain = nil
+	end
+	if PhysicsObjects.SpeedTrailRight then PhysicsObjects.SpeedTrailRight.Enabled = false end
+	if PhysicsObjects.SpeedTrailLeft then PhysicsObjects.SpeedTrailLeft.Enabled = false end
+
+	if RootPart and Humanoid then
+		makeCharacterUpright()
+
+		if applyVault then
+			local vel = RootPart.AssemblyLinearVelocity
+			local flatDir = safeUnit(Vector3.new(vel.X, 0, vel.Z), safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1)))
+
+			local releaseVel = vel * CONFIG.Swing.ReleaseMomentumMultiplier
+				+ flatDir * CONFIG.Swing.ReleaseForwardImpulse
+				+ Vector3.new(0, CONFIG.Swing.ReleaseUpwardImpulse, 0)
+
+			local horiz = Vector3.new(releaseVel.X, 0, releaseVel.Z)
+			if horiz.Magnitude > CONFIG.Swing.MaxTerminalSwingSpeed then
+				horiz = horiz.Unit * CONFIG.Swing.MaxTerminalSwingSpeed
+			end
+			RootPart.AssemblyLinearVelocity = Vector3.new(horiz.X, math.min(releaseVel.Y, 74), horiz.Z)
+
+			playWhooshSound(1.12)
+			State.CanDoubleJump = true
+			State.HasDoubleJumped = false
+			State.AirZipCount = 0
+
+			-- CHECK SETTING: Front Flipping While Swinging ON vs OFF
+			if SETTINGS.SwingFrontFlip then
+				performBodyFlip("Front")
+			end
+		end
+	end
+end
+
+local function startSwing()
+	if not RootPart or not Humanoid or Humanoid.Health <= 0 then return end
+	if State.IsSwinging then return end
+
+	stopBodyFlip()
+
+	local anchorPos, anchorNormal, isBuilding = findBestSwingAnchor(false)
+	if not anchorPos then return end
+
+	State.IsSwinging = true
+	State.SwingAnchorPos = anchorPos
+	State.SwingStartTime = os.clock()
+	State.IsBuildingAnchor = isBuilding
+	State.CanDoubleJump = true
+	State.HasDoubleJumped = false
+	State.AirZipCount = 0
+
+	State.ActiveHand = (State.ActiveHand == "Right") and "Left" or "Right"
+	local wristAtt = (State.ActiveHand == "Right") and PhysicsObjects.RightWristAttachment or PhysicsObjects.LeftWristAttachment
+	if not wristAtt then
+		wristAtt = PhysicsObjects.RootAttachment
+	end
+
+	-- Ground-to-Swing Vault Impulse
+	if isGrounded() then
+		local camLook = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+		RootPart.AssemblyLinearVelocity = RootPart.AssemblyLinearVelocity
+			+ Vector3.new(0, CONFIG.Swing.GroundVaultUpImpulse, 0)
+			+ camLook * CONFIG.Swing.GroundVaultForwardImpulse
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end
+
+	--Dive Momentum Conversion
+	local currentVel = RootPart.AssemblyLinearVelocity
+	local ropeVec = anchorPos - RootPart.Position
+	local ropeDir = safeUnit(ropeVec, Vector3.yAxis)
+	local initialDist = clamp(ropeVec.Magnitude, CONFIG.Swing.MinRopeLength, CONFIG.Swing.MaxRopeLength)
+
+	if currentVel.Y < -18 then
+		local fallSpeed = math.abs(currentVel.Y)
+		local camFlat = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+		local tangent = safeUnit(camFlat - ropeDir * camFlat:Dot(ropeDir), camFlat)
+		local convertedSpeed = math.min(currentVel.Magnitude + fallSpeed * 0.35 * CONFIG.Swing.DiveMomentumConversion, CONFIG.Swing.MaxTerminalSwingSpeed)
+		RootPart.AssemblyLinearVelocity = tangent * convertedSpeed
+		addCameraShake(0.32)
+	end
+
+	State.CurrentRopeLength = initialDist
+	PhysicsObjects.SwingAnchorPart.Position = anchorPos
+
+	PhysicsObjects.SwingRope.Attachment0 = PhysicsObjects.RootAttachment
+	PhysicsObjects.SwingRope.Attachment1 = PhysicsObjects.SwingAnchorAttachment
+	PhysicsObjects.SwingRope.Length = initialDist
+	PhysicsObjects.SwingRope.Enabled = true
+
+	PhysicsObjects.SwingVectorForce.Enabled = true
+	PhysicsObjects.SwingAlignOrientation.Enabled = true
+	Humanoid.AutoRotate = false
+
+	if PhysicsObjects.SwingWebBeamMain then
+		PhysicsObjects.SwingWebBeamMain:Destroy()
+	end
+	local mainBeam, coreBeam = createWebBeam(wristAtt, PhysicsObjects.SwingAnchorAttachment, 0.19, 0.11, CONFIG.Visuals.WebColor)
+	PhysicsObjects.SwingWebBeamMain = mainBeam
+	PhysicsObjects.SwingWebBeamCore = coreBeam
+
+	if PhysicsObjects.SpeedTrailRight then PhysicsObjects.SpeedTrailRight.Enabled = true end
+	if PhysicsObjects.SpeedTrailLeft then PhysicsObjects.SpeedTrailLeft.Enabled = true end
+
+	spawnWebNozzleFlash(wristAtt)
+	spawnAnchorWebSplat(anchorPos, anchorNormal, isBuilding)
+	playWebSound(1.0)
+	playAnim("WebSwing", 0.15, 1.0)
+end
+
+local function updateSwingPhysics(dt)
+	if not State.IsSwinging or not RootPart or not Humanoid then return end
+
+	local pos = RootPart.Position
+	local vel = RootPart.AssemblyLinearVelocity
+	local toAnchor = State.SwingAnchorPos - pos
+	local distToAnchor = toAnchor.Magnitude
+	local ropeDir = safeUnit(toAnchor, Vector3.yAxis)
+
+	-- Dynamic Web Tension Curve (slight elastic sag on fire -> taut wire)
+	if PhysicsObjects.SwingWebBeamMain and PhysicsObjects.SwingWebBeamCore then
+		local elapsed = os.clock() - State.SwingStartTime
+		local sag = math.max(0, (1 - elapsed * 5.5)) * 2.2
+		PhysicsObjects.SwingWebBeamMain.CurveSize0 = sag
+		PhysicsObjects.SwingWebBeamCore.CurveSize0 = sag + 0.25
+	end
+
+	-- Ground Clearance Protection & Ground-Skim Wake VFX
+	local groundRay = Workspace:Raycast(pos, Vector3.new(0, -18, 0), getRayParams())
+	if groundRay then
+		local groundDist = (pos - groundRay.Position).Magnitude
+		if groundDist < CONFIG.Swing.GroundClearanceBuffer and State.CurrentRopeLength > CONFIG.Swing.MinRopeLength then
+			State.CurrentRopeLength = math.max(CONFIG.Swing.MinRopeLength, State.CurrentRopeLength - CONFIG.Swing.ReelSpeed * 1.45 * dt)
+		end
+		if groundDist < CONFIG.Swing.GroundSkimHeight and vel.Magnitude > 45 then
+			spawnGroundSkimWake(groundRay.Position, groundRay.Normal, vel)
+		end
+	end
+
+	-- Active Rope Winch (Hold Space to reel in, Hold Ctrl to extend)
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+		State.CurrentRopeLength = math.max(CONFIG.Swing.MinRopeLength, State.CurrentRopeLength - CONFIG.Swing.ReelSpeed * dt)
+	elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+		State.CurrentRopeLength = math.min(CONFIG.Swing.MaxRopeLength, State.CurrentRopeLength + CONFIG.Swing.ReelSpeed * dt)
+	end
+	PhysicsObjects.SwingRope.Length = State.CurrentRopeLength
+
+	-- Pendulum Tangent & Steering Vectors
+	local camCF = Camera.CFrame
+	local camFlatLook = safeUnit(Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z), Vector3.new(0, 0, -1))
+	local moveInput = getWorldMoveDirection()
+	local desiredFlatDir = (moveInput.Magnitude > 0.05) and moveInput or camFlatLook
+
+	local velFlat = Vector3.new(vel.X, 0, vel.Z)
+	local currentForward = (velFlat.Magnitude > 5) and velFlat.Unit or desiredFlatDir
+	local tangentDir = safeUnit(currentForward - ropeDir * currentForward:Dot(ropeDir), desiredFlatDir)
+	local steerTangent = safeUnit(desiredFlatDir - ropeDir * desiredFlatDir:Dot(ropeDir), tangentDir)
+
+	local mass = getCharacterMass()
+	local surgeMult = State.IsSurgeActive and CONFIG.Ultimates.SurgeSpeedMultiplier or 1.0
+	local totalForce = Vector3.zero
+
+	-- 1. Downswing Gravity Acceleration
+	if vel.Y < 0 then
+		local downGravity = Workspace.Gravity * (CONFIG.Swing.GravityMultiplierDownswing - 1) * mass
+		totalForce = totalForce + Vector3.new(0, -downGravity, 0)
+	end
+
+	-- 2. Tangential Pendulum Drive
+	totalForce = totalForce + tangentDir * (CONFIG.Swing.TangentialDriveForce * surgeMult)
+
+	-- 3. Bottom-of-Arc Whip Boost
+	local verticalAlignment = ropeDir:Dot(Vector3.yAxis)
+	if verticalAlignment > 0.80 and distToAnchor >= State.CurrentRopeLength * 0.88 then
+		local whipFactor = clamp((verticalAlignment - 0.80) / 0.20, 0, 1)
+		totalForce = totalForce + tangentDir * (CONFIG.Swing.BottomArcWhipBoost * whipFactor * surgeMult)
+	end
+
+	-- 4. Upswing Momentum Assist
+	if vel.Y > 0 and pos.Y < State.SwingAnchorPos.Y - 8 then
+		totalForce = totalForce + tangentDir * CONFIG.Swing.UpswingMomentumAssist
+	end
+
+	-- 5. Omnidirectional Steering & Carve
+	if moveInput.Magnitude > 0.05 then
+		totalForce = totalForce + steerTangent * CONFIG.Swing.OmnidirectionalSteerForce
+		local speed = vel.Magnitude
+		if speed > 14 then
+			local carvedDir = safeUnit(vel.Unit:Lerp(steerTangent, clamp(CONFIG.Swing.VelocityCarveTurnRate * dt, 0, 0.28)), vel.Unit)
+			RootPart.AssemblyLinearVelocity = carvedDir * speed
+		end
+	end
+
+	-- 6. Quadratic Aerodynamic Drag + Speed Cap
+	local speed = vel.Magnitude
+	local maxSpeed = CONFIG.Swing.MaxTerminalSwingSpeed * surgeMult
+	local dragMag = speed * speed * CONFIG.Swing.AirResistanceCoeff
+	if speed > 1 then
+		totalForce = totalForce - vel.Unit * dragMag
+	end
+	if speed > maxSpeed then
+		RootPart.AssemblyLinearVelocity = vel.Unit * maxSpeed
+	end
+
+	PhysicsObjects.SwingVectorForce.Force = totalForce
+
+	-- Smooth Pendulum Body Banking Orientation
+	local lookDir = (vel.Magnitude > 6) and vel.Unit or tangentDir
+	local upVec = safeUnit(ropeDir:Lerp(Vector3.yAxis, 0.35), Vector3.yAxis)
+	local rightVec = safeUnit(lookDir:Cross(upVec), Vector3.xAxis)
+	local correctedUp = safeUnit(rightVec:Cross(lookDir), Vector3.yAxis)
+	PhysicsObjects.SwingAlignOrientation.CFrame = CFrame.fromMatrix(pos, rightVec, correctedUp, -lookDir)
+
+	-- Auto-Release at High Apex
+	if pos.Y > State.SwingAnchorPos.Y - 4 and vel.Y > 8 and (os.clock() - State.SwingStartTime) > 0.42 then
+		stopSwing(true)
+	end
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 2: REALISTIC 3D WALL & CEILING CRAWLING (WITH WEB-SNAP & CORNER WRAPPING)
+------------------------------------------------------------------------------------------------
+local function findClimbableSurface(customRange)
+	if not RootPart then return nil end
+	local origin = RootPart.Position
+	local range = customRange or CONFIG.Crawl.DetectionDistance
+	local params = getRayParams()
+
+	local dirs = {
+		RootPart.CFrame.LookVector,
+		Camera.CFrame.LookVector,
+		Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z),
+		-RootPart.CFrame.UpVector,
+		RootPart.CFrame.RightVector,
+		-RootPart.CFrame.RightVector,
+		-RootPart.CFrame.LookVector,
+		Vector3.yAxis,
+	}
+
+	local bestHit = nil
+	local bestDist = math.huge
+
+	for _, d in ipairs(dirs) do
+		if d.Magnitude > 0.05 then
+			local hit = Workspace:Raycast(origin, d.Unit * range, params)
+			if hit and hit.Instance and hit.Instance.CanCollide and hit.Normal.Y < 0.72 then
+				local dist = (hit.Position - origin).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					bestHit = hit
+				end
+			end
+		end
+	end
+
+	return bestHit
+end
+
+local function stopCrawl()
+	if not State.IsCrawling then return end
+	State.IsCrawling = false
+
+	stopAnim("WallCrawl", 0.15)
+
+	if PhysicsObjects.CrawlLinearVelocity then
+		PhysicsObjects.CrawlLinearVelocity.Enabled = false
+		PhysicsObjects.CrawlLinearVelocity.VectorVelocity = Vector3.zero
+	end
+	if PhysicsObjects.CrawlAlignOrientation then
+		PhysicsObjects.CrawlAlignOrientation.Enabled = false
+	end
+
+	makeCharacterUpright()
+end
+
+local function startCrawl(hitResult)
+	if not RootPart or not Humanoid then return end
+	stopSwing(false)
+	stopBodyFlip()
+
+	State.IsCrawling = true
+	State.CrawlNormal = hitResult.Normal
+	State.CrawlSurfacePos = hitResult.Position
+	State.CanDoubleJump = true
+	State.HasDoubleJumped = false
+	State.AirZipCount = 0
+
+	Humanoid.PlatformStand = false
+	Humanoid.AutoRotate = false
+
+	PhysicsObjects.CrawlLinearVelocity.VectorVelocity = Vector3.zero
+	PhysicsObjects.CrawlLinearVelocity.Enabled = true
+	PhysicsObjects.CrawlAlignOrientation.Enabled = true
+
+	playWebSound(1.22)
+	playAnim("WallCrawl", 0.15, 0)
+end
+
+local function snapAndStartCrawl()
+	if not RootPart or not Humanoid then return end
+
+	local closeHit = findClimbableSurface(CONFIG.Crawl.DetectionDistance)
+	if closeHit then
+		startCrawl(closeHit)
+		return
+	end
+
+	local snapHit = findClimbableSurface(CONFIG.Crawl.SnapDistance)
+	if snapHit then
+		local targetPos = snapHit.Position + snapHit.Normal * 2.4
+		local wristAtt = PhysicsObjects.RightWristAttachment or PhysicsObjects.RootAttachment
+		local tempPart = Instance.new("Part")
+		tempPart.Size = Vector3.new(0.2, 0.2, 0.2)
+		tempPart.Position = snapHit.Position
+		tempPart.Anchored = true
+		tempPart.Transparency = 1
+		tempPart.CanCollide = false
+		tempPart.Parent = ensureVFXFolder()
+
+		local tempAtt = Instance.new("Attachment")
+		tempAtt.Parent = tempPart
+		local beam = createWebBeam(wristAtt, tempAtt, 0.18, 0.10, CONFIG.Visuals.WebColor)
+		playWebSound(1.18)
+		spawnAnchorWebSplat(snapHit.Position, snapHit.Normal, true)
+
+		TweenService:Create(RootPart, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			CFrame = CFrame.lookAt(targetPos, targetPos - snapHit.Normal),
+		}):Play()
+
+		task.delay(0.16, function()
+			if beam then beam:Destroy() end
+			if tempPart then tempPart:Destroy() end
+			if RootPart and Humanoid and Humanoid.Health > 0 then
+				startCrawl(snapHit)
+			end
+		end)
+	end
+end
+
+local function updateCrawlPhysics(dt)
+	if not State.IsCrawling or not RootPart or not Humanoid then return end
+
+	local pos = RootPart.Position
+	local n = State.CrawlNormal
+	local params = getRayParams()
+
+	local forwardAxis, rightAxis = getRawInputAxes()
+	local hasInput = (math.abs(forwardAxis) > 0.05 or math.abs(rightAxis) > 0.05)
+
+	local camCF = Camera.CFrame
+	local camUpOnWall = camCF.LookVector - n * camCF.LookVector:Dot(n)
+	if camUpOnWall.Magnitude < 0.15 then
+		camUpOnWall = camCF.UpVector - n * camCF.UpVector:Dot(n)
+	end
+	if camUpOnWall.Magnitude < 0.15 then
+		camUpOnWall = Vector3.yAxis - n * Vector3.yAxis:Dot(n)
+	end
+	local wallUp = safeUnit(camUpOnWall, Vector3.yAxis)
+	local wallRight = safeUnit(wallUp:Cross(n), Vector3.xAxis)
+	wallUp = safeUnit(n:Cross(wallRight), Vector3.yAxis)
+
+	local moveDirOnSurface = Vector3.zero
+	if hasInput then
+		moveDirOnSurface = safeUnit(wallUp * forwardAxis + wallRight * rightAxis, wallUp)
+	end
+
+	local surfaceHit = nil
+	if hasInput then
+		local insideHit = Workspace:Raycast(pos, moveDirOnSurface * 4.2, params)
+		if insideHit and insideHit.Instance.CanCollide and insideHit.Normal.Y < 0.72 then
+			surfaceHit = insideHit
+		end
+	end
+
+	if not surfaceHit then
+		surfaceHit = Workspace:Raycast(pos, -n * CONFIG.Crawl.DetectionDistance, params)
+	end
+
+	if not surfaceHit and hasInput then
+		local wrapOrigin = pos + moveDirOnSurface * CONFIG.Crawl.CornerRayOffset - n * 1.6
+		local wrapDir = (-n - moveDirOnSurface * 1.15).Unit
+		local wrapHit = Workspace:Raycast(wrapOrigin, wrapDir * CONFIG.Crawl.CornerWrapDistance, params)
+		if wrapHit and wrapHit.Instance.CanCollide and wrapHit.Normal.Y < 0.72 then
+			surfaceHit = wrapHit
+		end
+	end
+
+	if not surfaceHit then
+		if hasInput and moveDirOnSurface.Y > 0.25 then
+			local ledgeCheckOrigin = pos + Vector3.new(0, 3.6, 0) - n * 3.0
+			local ledgeHit = Workspace:Raycast(ledgeCheckOrigin, Vector3.new(0, -6.5, 0), params)
+			if ledgeHit and ledgeHit.Normal.Y >= 0.72 then
+				local wallInward = safeUnit(Vector3.new(-n.X, 0, -n.Z), Vector3.new(0, 0, -1))
+				stopCrawl()
+				RootPart.AssemblyLinearVelocity = Vector3.new(0, CONFIG.Crawl.LedgeBoostUp, 0) + wallInward * CONFIG.Crawl.LedgeBoostForward
+				playWhooshSound(1.15)
+				performBodyFlip("Front")
+				return
+			end
+		end
+		stopCrawl()
+		return
+	end
+
+	State.CrawlNormal = safeUnit(State.CrawlNormal:Lerp(surfaceHit.Normal, clamp(CONFIG.Crawl.NormalLerpSpeed * dt, 0, 1)), surfaceHit.Normal)
+	State.CrawlSurfacePos = surfaceHit.Position
+	n = State.CrawlNormal
+
+	local isWallRunning = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+	local speed = isWallRunning and CONFIG.Crawl.WallRunSpeed or CONFIG.Crawl.CrawlSpeed
+	if State.IsSurgeActive then
+		speed = speed * CONFIG.Ultimates.SurgeSpeedMultiplier
+	end
+
+	local distToWall = (pos - surfaceHit.Position):Dot(n)
+	local idealDist = 2.35
+	local normalCorrectionVel = -n * ((distToWall - idealDist) * CONFIG.Crawl.AdhesionPullSpeed)
+
+	if hasInput then
+		PhysicsObjects.CrawlLinearVelocity.VectorVelocity = (moveDirOnSurface * speed) + normalCorrectionVel
+		local facingLook = moveDirOnSurface
+		local rightVec = safeUnit(facingLook:Cross(n), wallRight)
+		local correctedLook = safeUnit(n:Cross(rightVec), facingLook)
+		PhysicsObjects.CrawlAlignOrientation.CFrame = CFrame.fromMatrix(pos, rightVec, n, -correctedLook)
+		playAnim("WallCrawl", 0.1, isWallRunning and 1.85 or 1.2)
+	else
+		PhysicsObjects.CrawlLinearVelocity.VectorVelocity = normalCorrectionVel
+		local rightVec = safeUnit(wallUp:Cross(n), wallRight)
+		local correctedLook = safeUnit(n:Cross(rightVec), wallUp)
+		PhysicsObjects.CrawlAlignOrientation.CFrame = CFrame.fromMatrix(pos, rightVec, n, -correctedLook)
+		playAnim("WallCrawl", 0.1, 0)
+	end
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 3: REALISTIC MOTORIZED PENDULUM WEB HANG ([T])
+------------------------------------------------------------------------------------------------
+local function stopWebHang()
+	if not State.IsHanging then return end
+	State.IsHanging = false
+
+	stopAnim("WebHang", 0.2)
+
+	if PhysicsObjects.HangRope then
+		PhysicsObjects.HangRope.Enabled = false
+	end
+	if PhysicsObjects.HangVectorForce then
+		PhysicsObjects.HangVectorForce.Enabled = false
+		PhysicsObjects.HangVectorForce.Force = Vector3.zero
+	end
+	if PhysicsObjects.HangLinearVelocity then
+		PhysicsObjects.HangLinearVelocity.Enabled = false
+		PhysicsObjects.HangLinearVelocity.VectorVelocity = Vector3.zero
+	end
+	if PhysicsObjects.HangAlignOrientation then
+		PhysicsObjects.HangAlignOrientation.Enabled = false
+	end
+	if PhysicsObjects.HangBeam then
+		PhysicsObjects.HangBeam:Destroy()
+		PhysicsObjects.HangBeam = nil
+	end
+	if PhysicsObjects.HangWristBeam then
+		PhysicsObjects.HangWristBeam:Destroy()
+		PhysicsObjects.HangWristBeam = nil
+	end
+
+	makeCharacterUpright()
+end
+
+local function toggleWebHang()
+	if State.IsHanging then
+		stopWebHang()
+		return
+	end
+	if not RootPart or not Humanoid then return end
+
+	stopSwing(false)
+	stopCrawl()
+	stopBodyFlip()
+
+	local origin = RootPart.Position
+	local params = getRayParams()
+	local ceilHit = Workspace:Raycast(origin, Vector3.new(0, CONFIG.WebHang.MaxCeilingDistance, 0), params)
+
+	if not ceilHit then
+		for i = 1, 12 do
+			local angle = (i / 12) * math.pi * 2
+			local dir = (Vector3.new(math.cos(angle) * 0.28, 1, math.sin(angle) * 0.28)).Unit
+			local hit = Workspace:Raycast(origin, dir * CONFIG.WebHang.MaxCeilingDistance, params)
+			if hit and (hit.Position.Y - origin.Y) > 16 then
+				ceilHit = hit
+				break
+			end
+		end
+	end
+
+	local anchorPos
+	local anchorNormal = -Vector3.yAxis
+	local isBuilding = false
+	if ceilHit and (ceilHit.Position.Y - origin.Y) > 14 then
+		anchorPos = ceilHit.Position
+		anchorNormal = ceilHit.Normal
+		isBuilding = true
+	else
+		anchorPos = origin + Vector3.new(0, CONFIG.WebHang.DefaultSkyCeilingHeight, 0)
+	end
+
+	State.IsHanging = true
+	State.HangAnchorPos = anchorPos
+	local currentDist = (anchorPos - origin).Magnitude
+
+	local floorRay = Workspace:Raycast(origin, Vector3.new(0, -25, 0), params)
+	local groundClearance = floorRay and (origin.Y - floorRay.Position.Y) or 999
+	if groundClearance < CONFIG.WebHang.MinGroundClearanceWhenHanging then
+		local liftNeeded = CONFIG.WebHang.MinGroundClearanceWhenHanging - groundClearance
+		State.HangLength = clamp(currentDist - liftNeeded, CONFIG.WebHang.MinHangLength, CONFIG.WebHang.MaxHangLength)
+	else
+		State.HangLength = clamp(currentDist, CONFIG.WebHang.MinHangLength, CONFIG.WebHang.MaxHangLength)
+	end
+
+	Humanoid.PlatformStand = false
+	Humanoid.AutoRotate = false
+
+	PhysicsObjects.HangAnchorPart.Position = anchorPos
+	PhysicsObjects.HangRope.Attachment0 = PhysicsObjects.TopHangAttachment
+	PhysicsObjects.HangRope.Attachment1 = PhysicsObjects.HangAnchorAttachment
+	PhysicsObjects.HangRope.Length = State.HangLength
+	PhysicsObjects.HangRope.Enabled = true
+
+	PhysicsObjects.HangVectorForce.Enabled = true
+	PhysicsObjects.HangAlignOrientation.Enabled = true
+
+	local mainBeam = createWebBeam(PhysicsObjects.TopHangAttachment, PhysicsObjects.HangAnchorAttachment, 0.16, 0.12, CONFIG.Visuals.WebColor)
+	PhysicsObjects.HangBeam = mainBeam
+
+	if PhysicsObjects.RightWristAttachment then
+		local wristBeam = createWebBeam(PhysicsObjects.RightWristAttachment, PhysicsObjects.TopHangAttachment, 0.11, 0.11, CONFIG.Visuals.WebColor)
+		PhysicsObjects.HangWristBeam = wristBeam
+	end
+
+	spawnAnchorWebSplat(anchorPos, anchorNormal, isBuilding)
+	playWebSound(0.95)
+	playAnim("WebHang", 0.2, 1.0)
+end
+
+local function updateWebHangPhysics(dt)
+	if not State.IsHanging or not RootPart or not Humanoid then return end
+
+	local pos = RootPart.Position
+	local vel = RootPart.AssemblyLinearVelocity
+	local toAnchor = State.HangAnchorPos - pos
+	local currentDist = toAnchor.Magnitude
+	local ropeDir = safeUnit(toAnchor, Vector3.yAxis)
+
+	local forwardAxis, rightAxis = getRawInputAxes()
+	local isClimbingUp = (forwardAxis > 0.1) or UserInputService:IsKeyDown(Enum.KeyCode.Space)
+	local isRappellingDown = (forwardAxis < -0.1) or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+
+	if isClimbingUp then
+		State.HangLength = math.max(CONFIG.WebHang.MinHangLength, State.HangLength - CONFIG.WebHang.ClimbSpeed * dt)
+	elseif isRappellingDown then
+		State.HangLength = math.min(CONFIG.WebHang.MaxHangLength, State.HangLength + CONFIG.WebHang.ClimbSpeed * dt)
+	end
+
+	PhysicsObjects.HangRope.Length = State.HangLength
+
+	local camCF = Camera.CFrame
+	local camRight = safeUnit(Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z), Vector3.xAxis)
+	local camLook = safeUnit(Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z), Vector3.new(0, 0, -1))
+
+	local needWinchUp = (currentDist > State.HangLength + 0.6) or isClimbingUp
+	if needWinchUp and State.HangLength > CONFIG.WebHang.MinHangLength then
+		local pullSpeed = isClimbingUp and CONFIG.WebHang.ClimbSpeed or CONFIG.WebHang.AutoLiftSpeed
+		local lateralVel = vel - ropeDir * vel:Dot(ropeDir)
+		PhysicsObjects.HangLinearVelocity.VectorVelocity = (ropeDir * pullSpeed) + (lateralVel * 0.85) + (camRight * rightAxis * 14)
+		PhysicsObjects.HangLinearVelocity.Enabled = true
+	else
+		PhysicsObjects.HangLinearVelocity.Enabled = false
+	end
+
+	local swayInputVec = camRight * rightAxis
+	local swayForce = swayInputVec * CONFIG.WebHang.SwayForce
+	local horizVel = Vector3.new(vel.X, 0, vel.Z)
+	local dampingForce = -horizVel * (getCharacterMass() * CONFIG.WebHang.HorizontalDamping)
+	PhysicsObjects.HangVectorForce.Force = swayForce + dampingForce
+
+	local upVec = ropeDir
+	local rightVec = safeUnit(camLook:Cross(upVec), camRight)
+	local correctedLook = safeUnit(upVec:Cross(rightVec), camLook)
+	PhysicsObjects.HangAlignOrientation.CFrame = CFrame.fromMatrix(pos, rightVec, upVec, -correctedLook)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 4: WEB ZIP & POINT LAUNCH (USES WEB_ZIP_ANIM = "rbxassetid://100103306715371")
+------------------------------------------------------------------------------------------------
+local function performWebZip()
+	if not RootPart or not Humanoid then return end
+	if not isCooldownReady("WebZip") then return end
+	if not isGrounded() and State.AirZipCount >= CONFIG.WebZip.MaxAirChainZips then return end
+
+	setCooldown("WebZip", CONFIG.WebZip.Cooldown)
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+	stopBodyFlip()
+
+	State.IsWebZipping = true
+	if not isGrounded() then
+		State.AirZipCount = State.AirZipCount + 1
+	else
+		State.AirZipCount = 0
+	end
+
+	local origin = RootPart.Position
+	local camLook = Camera.CFrame.LookVector
+	local params = getRayParams()
+	local hit = Workspace:Raycast(origin, camLook * CONFIG.WebZip.MaxDistance, params)
+
+	local targetPos
+	local isSurfaceZip = false
+	if hit then
+		targetPos = hit.Position + hit.Normal * 3.2
+		isSurfaceZip = true
+		spawnAnchorWebSplat(hit.Position, hit.Normal, true)
+	else
+		local zipDir = Vector3.new(camLook.X, math.max(camLook.Y, 0.20), camLook.Z).Unit
+		targetPos = origin + zipDir * CONFIG.WebZip.AirZipDistance
+	end
+
+	State.ActiveHand = (State.ActiveHand == "Right") and "Left" or "Right"
+	local wristAtt = (State.ActiveHand == "Right") and PhysicsObjects.RightWristAttachment or PhysicsObjects.LeftWristAttachment
+	if not wristAtt then wristAtt = PhysicsObjects.RootAttachment end
+
+	local tempAnchor = Instance.new("Part")
+	tempAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	tempAnchor.Position = hit and hit.Position or targetPos
+	tempAnchor.Anchored = true
+	tempAnchor.CanCollide = false
+	tempAnchor.Transparency = 1
+	tempAnchor.Parent = ensureVFXFolder()
+
+	local tempAtt = Instance.new("Attachment")
+	tempAtt.Parent = tempAnchor
+
+	local zipBeam = createWebBeam(wristAtt, tempAtt, 0.21, 0.13, CONFIG.Visuals.WebColor)
+	spawnWebNozzleFlash(wristAtt)
+	spawnShockwaveRing(origin, (targetPos - origin).Unit, 2, 11, 0.28, CONFIG.Visuals.WebGlowColor)
+	playWebSound(1.18)
+	playWhooshSound(1.22)
+
+	-- PLAY CUSTOM WEB ZIP ANIMATION (rbxassetid://100103306715371)
+	playAnim("WebZip", 0.05, 1.15)
+
+	local startTime = os.clock()
+	local maxDuration = 0.56
+
+	task.spawn(function()
+		while State.IsWebZipping and (os.clock() - startTime) < maxDuration do
+			if not RootPart or not RootPart.Parent or State.IsSwinging or State.IsCrawling then
+				break
+			end
+			local toTarget = targetPos - RootPart.Position
+			local dist = toTarget.Magnitude
+			if dist <= CONFIG.WebZip.ArrivalThreshold then
+				break
+			end
+
+			local zipDir = toTarget.Unit
+			RootPart.AssemblyLinearVelocity = zipDir * CONFIG.WebZip.ZipSpeed
+			local flatLook = safeUnit(Vector3.new(zipDir.X, 0, zipDir.Z), Vector3.new(0, 0, -1))
+			RootPart.CFrame = CFrame.lookAt(RootPart.Position, RootPart.Position + flatLook)
+
+			RunService.Heartbeat:Wait()
+		end
+
+		if zipBeam then zipBeam:Destroy() end
+		if tempAnchor then tempAnchor:Destroy() end
+		State.IsWebZipping = false
+		stopAnim("WebZip", 0.16)
+
+		if RootPart and not State.IsSwinging and not State.IsCrawling then
+			makeCharacterUpright()
+			if isSurfaceZip then
+				State.PointLaunchReady = true
+				State.PointLaunchExpire = os.clock() + CONFIG.WebZip.PointLaunchWindow
+				RootPart.AssemblyLinearVelocity = RootPart.AssemblyLinearVelocity * 0.35 + Vector3.new(0, 20, 0)
+			else
+				RootPart.AssemblyLinearVelocity = RootPart.AssemblyLinearVelocity * 0.65 + Vector3.new(0, 18, 0)
+			end
+			State.CanDoubleJump = true
+			State.HasDoubleJumped = false
+		end
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 5: SLINGSHOT SUPER-LAUNCH ([Y])
+------------------------------------------------------------------------------------------------
+local function cleanupSlingshotVisuals()
+	if PhysicsObjects.SlingshotLeftBeam then PhysicsObjects.SlingshotLeftBeam:Destroy() PhysicsObjects.SlingshotLeftBeam = nil end
+	if PhysicsObjects.SlingshotRightBeam then PhysicsObjects.SlingshotRightBeam:Destroy() PhysicsObjects.SlingshotRightBeam = nil end
+	if PhysicsObjects.SlingshotLeftPart then PhysicsObjects.SlingshotLeftPart:Destroy() PhysicsObjects.SlingshotLeftPart = nil end
+	if PhysicsObjects.SlingshotRightPart then PhysicsObjects.SlingshotRightPart:Destroy() PhysicsObjects.SlingshotRightPart = nil end
+end
+
+local function startSlingshotCharge()
+	if not RootPart or not Humanoid or State.IsChargingSling then return end
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+
+	State.IsChargingSling = true
+	State.SlingChargeStart = os.clock()
+
+	local origin = RootPart.Position
+	local camLook = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+	local camRight = camLook:Cross(Vector3.yAxis)
+	local params = getRayParams()
+
+	local leftRay = Workspace:Raycast(origin, (camLook * CONFIG.Slingshot.AnchorForwardDistance - camRight * CONFIG.Slingshot.AnchorSpread), params)
+	local rightRay = Workspace:Raycast(origin, (camLook * CONFIG.Slingshot.AnchorForwardDistance + camRight * CONFIG.Slingshot.AnchorSpread), params)
+
+	local leftPos = leftRay and leftRay.Position or (origin + camLook * 85 - camRight * CONFIG.Slingshot.AnchorSpread + Vector3.new(0, 16, 0))
+	local rightPos = rightRay and rightRay.Position or (origin + camLook * 85 + camRight * CONFIG.Slingshot.AnchorSpread + Vector3.new(0, 16, 0))
+
+	local lPart = Instance.new("Part")
+	lPart.Size = Vector3.new(0.2, 0.2, 0.2)
+	lPart.Position = leftPos
+	lPart.Anchored = true
+	lPart.CanCollide = false
+	lPart.Transparency = 1
+	lPart.Parent = ensureVFXFolder()
+	local lAtt = Instance.new("Attachment", lPart)
+
+	local rPart = Instance.new("Part")
+	rPart.Size = Vector3.new(0.2, 0.2, 0.2)
+	rPart.Position = rightPos
+	rPart.Anchored = true
+	rPart.CanCollide = false
+	rPart.Transparency = 1
+	rPart.Parent = ensureVFXFolder()
+	local rAtt = Instance.new("Attachment", rPart)
+
+	PhysicsObjects.SlingshotLeftPart = lPart
+	PhysicsObjects.SlingshotRightPart = rPart
+	PhysicsObjects.SlingshotLeftBeam = createWebBeam(PhysicsObjects.LeftWristAttachment or PhysicsObjects.RootAttachment, lAtt, 0.20, 0.14)
+	PhysicsObjects.SlingshotRightBeam = createWebBeam(PhysicsObjects.RightWristAttachment or PhysicsObjects.RootAttachment, rAtt, 0.20, 0.14)
+
+	playWebSound(0.88)
+end
+
+local function releaseSlingshot()
+	if not State.IsChargingSling then return end
+	State.IsChargingSling = false
+
+	local chargeAlpha = clamp((os.clock() - State.SlingChargeStart) / CONFIG.Slingshot.MaxChargeTime, 0, 1)
+	cleanupSlingshotVisuals()
+
+	if not RootPart or not Humanoid then return end
+	local launchSpeed = lerp(CONFIG.Slingshot.MinLaunchSpeed, CONFIG.Slingshot.MaxLaunchSpeed, chargeAlpha)
+	local launchDir = safeUnit(Camera.CFrame.LookVector + Vector3.new(0, 0.25, 0), Vector3.new(0, 0.3, -1))
+
+	Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	RootPart.AssemblyLinearVelocity = launchDir * launchSpeed + Vector3.new(0, CONFIG.Slingshot.UpwardLift * chargeAlpha, 0)
+
+	spawnShockwaveRing(RootPart.Position, launchDir, 3, 22, 0.42, CONFIG.Visuals.WebGlowColor)
+	playWhooshSound(0.92)
+	addCameraShake(0.65)
+	State.CanDoubleJump = true
+	State.HasDoubleJumped = false
+	State.AirZipCount = 0
+	performBodyFlip("Front")
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 6: WEB SHOOTERS ([Q]), WEB PULL ([G]), WEB BOMB ([Z]), WEB SHIELD ([V])
+------------------------------------------------------------------------------------------------
+local function wrapTargetInWebCocoon(targetPart)
+	if not targetPart then return end
+	local model = targetPart:FindFirstAncestorOfClass("Model")
+	local root = model and (model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso")) or targetPart
+
+	local cocoon = Instance.new("Part")
+	cocoon.Name = "WebCocoon"
+	cocoon.Shape = Enum.PartType.Ball
+	cocoon.Size = Vector3.new(4.2, 5.2, 4.2)
+	cocoon.Material = Enum.Material.Neon
+	cocoon.Color = CONFIG.Visuals.WebColor
+	cocoon.Transparency = 0.28
+	cocoon.CanCollide = false
+	cocoon.CanQuery = false
+	cocoon.CanTouch = false
+	cocoon.Massless = true
+	cocoon.CFrame = root.CFrame
+	cocoon.Parent = ensureVFXFolder()
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = cocoon
+	weld.Parent = cocoon
+
+	local enemyHum = model and model:FindFirstChildOfClass("Humanoid")
+	if enemyHum then
+		enemyHum.PlatformStand = true
+		task.delay(3.0, function()
+			if enemyHum and enemyHum.Parent then
+				enemyHum.PlatformStand = false
+			end
+		end)
+	end
+
+	task.delay(3.0, function()
+		if cocoon and cocoon.Parent then
+			TweenService:Create(cocoon, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+			Debris:AddItem(cocoon, 0.45)
+		end
+	end)
+end
+
+local function fireWebProjectile()
+	if not RootPart then return end
+	if not consumeFluid(CONFIG.Gadgets.WebShotCost) then return end
+
+	State.ActiveHand = (State.ActiveHand == "Right") and "Left" or "Right"
+	local wristAtt = (State.ActiveHand == "Right") and PhysicsObjects.RightWristAttachment or PhysicsObjects.LeftWristAttachment
+	local startPos = wristAtt and wristAtt.WorldPosition or (RootPart.Position + RootPart.CFrame.LookVector * 2)
+	local aimDir = Camera.CFrame.LookVector
+
+	spawnWebNozzleFlash(wristAtt)
+	playWebSound(1.25)
+
+	local proj = Instance.new("Part")
+	proj.Name = "WebProjectile"
+	proj.Size = Vector3.new(0.6, 0.6, 1.8)
+	proj.Material = Enum.Material.Neon
+	proj.Color = CONFIG.Visuals.WebColor
+	proj.Anchored = true
+	proj.CanCollide = false
+	proj.CanQuery = false
+	proj.CanTouch = false
+	proj.CFrame = CFrame.lookAt(startPos, startPos + aimDir)
+	proj.Parent = ensureVFXFolder()
+
+	local att0 = Instance.new("Attachment", proj)
+	att0.Position = Vector3.new(0, 0, -0.7)
+	local att1 = Instance.new("Attachment", proj)
+	att1.Position = Vector3.new(0, 0, 0.7)
+
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = att0
+	trail.Attachment1 = att1
+	trail.Lifetime = 0.18
+	trail.Color = ColorSequence.new(CONFIG.Visuals.WebColor)
+	trail.LightEmission = 0.8
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	trail.Parent = proj
+
+	local params = getRayParams({ proj })
+	local traveled = 0
+	local curPos = startPos
+
+	task.spawn(function()
+		while proj and proj.Parent and traveled < CONFIG.Gadgets.WebShotRange do
+			local dt = RunService.Heartbeat:Wait()
+			local step = aimDir * (CONFIG.Gadgets.WebShotSpeed * dt)
+			local hit = Workspace:Raycast(curPos, step, params)
+			if hit then
+				spawnAnchorWebSplat(hit.Position, hit.Normal, true)
+				playImpactSound(1.2)
+				if hit.Instance and not hit.Instance.Anchored then
+					hit.Instance:ApplyImpulse(aimDir * CONFIG.Gadgets.WebShotImpulse * hit.Instance:GetMass())
+					wrapTargetInWebCocoon(hit.Instance)
+				end
+				break
+			end
+			curPos = curPos + step
+			traveled = traveled + step.Magnitude
+			proj.CFrame = CFrame.lookAt(curPos, curPos + aimDir)
+		end
+		if proj then proj:Destroy() end
+	end)
+end
+
+local function performWebPull()
+	if not RootPart then return end
+	if not consumeFluid(CONFIG.Gadgets.WebPullCost) then return end
+
+	local origin = RootPart.Position
+	local aimDir = Camera.CFrame.LookVector
+	local hit = Workspace:Raycast(origin, aimDir * CONFIG.Gadgets.WebPullRange, getRayParams())
+	if not hit then return end
+
+	local wristAtt = PhysicsObjects.RightWristAttachment or PhysicsObjects.RootAttachment
+	local tempPart = Instance.new("Part")
+	tempPart.Size = Vector3.new(0.2, 0.2, 0.2)
+	tempPart.Position = hit.Position
+	tempPart.Anchored = true
+	tempPart.CanCollide = false
+	tempPart.Transparency = 1
+	tempPart.Parent = ensureVFXFolder()
+	local tempAtt = Instance.new("Attachment", tempPart)
+
+	local beam = createWebBeam(wristAtt, tempAtt, 0.22, 0.14)
+	playWebSound(0.95)
+	playWhooshSound(1.05)
+
+	if hit.Instance and not hit.Instance.Anchored then
+		local pullDir = safeUnit((origin + RootPart.CFrame.LookVector * 5 + Vector3.new(0, 4, 0)) - hit.Position, -aimDir)
+		hit.Instance.AssemblyLinearVelocity = pullDir * CONFIG.Gadgets.WebPullForce
+	else
+		local pullToTarget = safeUnit(hit.Position - origin, aimDir)
+		RootPart.AssemblyLinearVelocity = pullToTarget * (CONFIG.Gadgets.WebPullForce * 0.9) + Vector3.new(0, 22, 0)
+	end
+
+	Debris:AddItem(beam, 0.28)
+	Debris:AddItem(tempPart, 0.30)
+end
+
+local function throwWebBomb()
+	if not RootPart then return end
+	if not consumeFluid(CONFIG.Gadgets.WebBombCost) then return end
+
+	playWebSound(0.85)
+	local startPos = RootPart.Position + RootPart.CFrame.LookVector * 3 + Vector3.new(0, 2, 0)
+	local vel = Camera.CFrame.LookVector * 105 + Vector3.new(0, 28, 0)
+
+	local bomb = Instance.new("Part")
+	bomb.Name = "SpiderWebBomb"
+	bomb.Shape = Enum.PartType.Ball
+	bomb.Size = Vector3.new(1.2, 1.2, 1.2)
+	bomb.Material = Enum.Material.Neon
+	bomb.Color = CONFIG.Visuals.PrimaryColor
+	bomb.Anchored = true
+	bomb.CanCollide = false
+	bomb.Position = startPos
+	bomb.Parent = ensureVFXFolder()
+
+	local params = getRayParams({ bomb })
+	local curPos = startPos
+	local curVel = vel
+	local startTime = os.clock()
+
+	task.spawn(function()
+		while bomb and bomb.Parent and (os.clock() - startTime) < 2.5 do
+			local dt = RunService.Heartbeat:Wait()
+			curVel = curVel + Vector3.new(0, -Workspace.Gravity * 0.65 * dt, 0)
+			local step = curVel * dt
+			local hit = Workspace:Raycast(curPos, step, params)
+			if hit then
+				curPos = hit.Position
+				break
+			end
+			curPos = curPos + step
+			bomb.Position = curPos
+		end
+
+		if bomb then bomb:Destroy() end
+		playImpactSound(0.95)
+		addCameraShake(0.55)
+		spawnShockwaveRing(curPos, Vector3.yAxis, 2, CONFIG.Gadgets.WebBombRadius * 2, 0.45, CONFIG.Visuals.WebColor)
+
+		for i = 1, 14 do
+			local angle = (i / 14) * math.pi * 2
+			local rayDir = Vector3.new(math.cos(angle), -0.25, math.sin(angle)).Unit
+			local endP = curPos + rayDir * CONFIG.Gadgets.WebBombRadius
+			local strand = Instance.new("Part")
+			strand.Size = Vector3.new(0.25, 0.25, CONFIG.Gadgets.WebBombRadius)
+			strand.Material = Enum.Material.Neon
+			strand.Color = CONFIG.Visuals.WebColor
+			strand.Anchored = true
+			strand.CanCollide = false
+			strand.CFrame = CFrame.lookAt((curPos + endP) * 0.5, endP)
+			strand.Parent = ensureVFXFolder()
+			TweenService:Create(strand, TweenInfo.new(1.2), { Transparency = 1 }):Play()
+			Debris:AddItem(strand, 1.25)
+		end
+
+		local overlap = Workspace:GetPartBoundsInRadius(curPos, CONFIG.Gadgets.WebBombRadius)
+		local processedModels = {}
+		for _, part in ipairs(overlap) do
+			if not part:IsDescendantOf(Character) and not part.Anchored then
+				local model = part:FindFirstAncestorOfClass("Model")
+				if model and not processedModels[model] then
+					processedModels[model] = true
+					wrapTargetInWebCocoon(part)
+				end
+				local pushDir = safeUnit(part.Position - curPos + Vector3.new(0, 3, 0), Vector3.yAxis)
+				part.AssemblyLinearVelocity = pushDir * CONFIG.Gadgets.WebBombForce
+			end
+		end
+	end)
+end
+
+local function toggleWebShield(enable)
+	if enable == nil then
+		enable = not State.IsShielding
+	end
+	if not enable then
+		State.IsShielding = false
+		if PhysicsObjects.ShieldModel then
+			PhysicsObjects.ShieldModel:Destroy()
+			PhysicsObjects.ShieldModel = nil
+		end
+		return
+	end
+
+	if not RootPart or State.WebFluid < 10 then return end
+	State.IsShielding = true
+	playWebSound(1.05)
+
+	local shield = Instance.new("Part")
+	shield.Name = "SpiderWebShield"
+	shield.Size = Vector3.new(6.2, 6.2, 0.35)
+	shield.Material = Enum.Material.ForceField
+	shield.Color = CONFIG.Visuals.WebGlowColor
+	shield.Transparency = 0.25
+	shield.CanCollide = false
+	shield.CanQuery = false
+	shield.CanTouch = false
+	shield.Massless = true
+	shield.CFrame = RootPart.CFrame * CFrame.new(0, 0.5, -3.2)
+	shield.Parent = ensureVFXFolder()
+
+	local weld = Instance.new("Weld")
+	weld.Part0 = RootPart
+	weld.Part1 = shield
+	weld.C0 = CFrame.new(0, 0.5, -3.2)
+	weld.Parent = shield
+
+	PhysicsObjects.ShieldModel = shield
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 7: BIO-ELECTRIC VENOM SMASH ([U]), WEB BLOSSOM ([H]), OVERDRIVE SURGE ([J])
+------------------------------------------------------------------------------------------------
+local function performVenomSmash()
+	if not RootPart or not Humanoid then return end
+	if not isCooldownReady("VenomSmash") or State.IsVenomSmashing then return end
+
+	setCooldown("VenomSmash", CONFIG.Ultimates.VenomSmashCooldown)
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+
+	State.IsVenomSmashing = true
+	playWhooshSound(0.85)
+
+	for i = 1, 6 do
+		spawnLightningArc(RootPart.Position, RootPart.Position + Vector3.new(math.random(-6, 6), math.random(-4, 6), math.random(-6, 6)), CONFIG.Visuals.VenomColor, 0.28, 0.25)
+	end
+
+	RootPart.AssemblyLinearVelocity = Vector3.new(0, 52, 0) + Camera.CFrame.LookVector * 28
+	task.wait(0.22)
+
+	if RootPart then
+		RootPart.AssemblyLinearVelocity = Vector3.new(0, -145, 0) + Camera.CFrame.LookVector * 36
+	end
+
+	local startWait = os.clock()
+	while RootPart and not isGrounded() and (os.clock() - startWait) < 1.8 do
+		RunService.Heartbeat:Wait()
+	end
+
+	State.IsVenomSmashing = false
+	if not RootPart then return end
+
+	local impactPos = RootPart.Position - Vector3.new(0, 2.5, 0)
+	playImpactSound(0.85)
+	addCameraShake(1.1)
+	playLandingAnimation()
+
+	spawnShockwaveRing(impactPos, Vector3.yAxis, 3, CONFIG.Ultimates.VenomSmashRadius * 2.1, 0.55, CONFIG.Visuals.VenomColor)
+	spawnShockwaveRing(impactPos, Vector3.yAxis, 2, CONFIG.Ultimates.VenomSmashRadius * 1.4, 0.38, Color3.fromRGB(255, 255, 255))
+
+	for i = 1, 14 do
+		local angle = (i / 14) * math.pi * 2
+		local arcEnd = impactPos + Vector3.new(math.cos(angle) * CONFIG.Ultimates.VenomSmashRadius, math.random(2, 10), math.sin(angle) * CONFIG.Ultimates.VenomSmashRadius)
+		spawnLightningArc(impactPos, arcEnd, CONFIG.Visuals.VenomColor, 0.32, 0.45)
+	end
+
+	local overlap = Workspace:GetPartBoundsInRadius(impactPos, CONFIG.Ultimates.VenomSmashRadius)
+	for _, part in ipairs(overlap) do
+		if not part:IsDescendantOf(Character) and not part.Anchored then
+			local dir = safeUnit(part.Position - impactPos + Vector3.new(0, 6, 0), Vector3.yAxis)
+			part.AssemblyLinearVelocity = dir * CONFIG.Ultimates.VenomSmashForce
+		end
+	end
+end
+
+local function performWebBlossom()
+	if not RootPart or not Humanoid then return end
+	if not isCooldownReady("WebBlossom") or State.IsBlossoming then return end
+
+	setCooldown("WebBlossom", CONFIG.Ultimates.WebBlossomCooldown)
+	stopSwing(false)
+	stopCrawl()
+
+	State.IsBlossoming = true
+	RootPart.AssemblyLinearVelocity = Vector3.new(0, 58, 0)
+	playWhooshSound(1.1)
+	performBodyFlip("Corkscrew")
+
+	task.spawn(function()
+		local totalRays = CONFIG.Ultimates.WebBlossomRays
+		for i = 1, totalRays do
+			if not RootPart then break end
+			local angle = (i / totalRays) * math.pi * 4
+			local dir = Vector3.new(math.cos(angle), -0.35, math.sin(angle)).Unit
+			local hit = Workspace:Raycast(RootPart.Position, dir * CONFIG.Ultimates.WebBlossomRadius, getRayParams())
+			local endPos = hit and hit.Position or (RootPart.Position + dir * CONFIG.Ultimates.WebBlossomRadius)
+
+			local strand = Instance.new("Part")
+			strand.Size = Vector3.new(0.22, 0.22, (endPos - RootPart.Position).Magnitude)
+			strand.Material = Enum.Material.Neon
+			strand.Color = CONFIG.Visuals.WebColor
+			strand.Anchored = true
+			strand.CanCollide = false
+			strand.CFrame = CFrame.lookAt((RootPart.Position + endPos) * 0.5, endPos)
+			strand.Parent = ensureVFXFolder()
+			TweenService:Create(strand, TweenInfo.new(0.65), { Transparency = 1 }):Play()
+			Debris:AddItem(strand, 0.7)
+
+			if hit then
+				spawnAnchorWebSplat(hit.Position, hit.Normal, true)
+				if hit.Instance and not hit.Instance.Anchored then
+					wrapTargetInWebCocoon(hit.Instance)
+				end
+			end
+
+			playWebSound(1.1 + (i % 4) * 0.08)
+			task.wait(0.04)
+		end
+		State.IsBlossoming = false
+	end)
+end
+
+local function activateSurgeMode()
+	if not Character or not RootPart then return end
+	if State.IsSurgeActive or not isCooldownReady("SurgeMode") then return end
+
+	setCooldown("SurgeMode", CONFIG.Ultimates.SurgeCooldown)
+	State.IsSurgeActive = true
+	State.WebFluid = CONFIG.Gadgets.MaxWebFluid
+
+	playImpactSound(1.15)
+	addCameraShake(0.75)
+	spawnShockwaveRing(RootPart.Position, Vector3.yAxis, 2, 28, 0.45, CONFIG.Visuals.VenomColor)
+
+	local hl = Instance.new("Highlight")
+	hl.Name = "SpiderSurgeAura"
+	hl.FillColor = CONFIG.Visuals.PrimaryColor
+	hl.OutlineColor = CONFIG.Visuals.VenomColor
+	hl.FillTransparency = 0.65
+	hl.OutlineTransparency = 0.05
+	hl.Parent = Character
+	PhysicsObjects.SurgeHighlight = hl
+
+	local torso = Limbs.Torso or RootPart
+	for i = 1, 4 do
+		local tendril = Instance.new("Part")
+		tendril.Name = "SurgeTendril_" .. i
+		tendril.Size = Vector3.new(0.24, 0.24, 3.6)
+		tendril.Material = Enum.Material.Neon
+		tendril.Color = CONFIG.Visuals.VenomColor
+		tendril.CanCollide = false
+		tendril.CanQuery = false
+		tendril.CanTouch = false
+		tendril.Massless = true
+		tendril.Parent = Character
+
+		local weld = Instance.new("Weld")
+		weld.Part0 = torso
+		weld.Part1 = tendril
+		local xOff = (i <= 2) and -1.2 or 1.2
+		local yOff = (i % 2 == 0) and 0.9 or -0.4
+		weld.C0 = CFrame.new(xOff, yOff, 1.4) * CFrame.Angles(math.rad(yOff * 22), math.rad(xOff * -28), 0)
+		weld.Parent = tendril
+		table.insert(PhysicsObjects.SymbioteTendrils, tendril)
+	end
+
+	task.delay(CONFIG.Ultimates.SurgeDuration, function()
+		State.IsSurgeActive = false
+		if PhysicsObjects.SurgeHighlight then
+			PhysicsObjects.SurgeHighlight:Destroy()
+			PhysicsObjects.SurgeHighlight = nil
+		end
+		for _, t in ipairs(PhysicsObjects.SymbioteTendrils) do
+			if t and t.Parent then t:Destroy() end
+		end
+		table.clear(PhysicsObjects.SymbioteTendrils)
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 8: SPIDER-SENSE & EVASIVE 360-DEGREE FLIP DODGE ([X])
+------------------------------------------------------------------------------------------------
+local function scanSpiderSense()
+	if not RootPart then return end
+	if not SETTINGS.AutoSpiderSense then
+		State.DangerDetected = false
+		if UI.SpiderSenseGui then UI.SpiderSenseGui.Enabled = false end
+		return
+	end
+
+	local origin = RootPart.Position
+	local overlap = Workspace:GetPartBoundsInRadius(origin, CONFIG.SpiderSense.ScanRadius)
+	local dangerFound = false
+	local closestThreat = nil
+	local minTime = math.huge
+
+	for _, part in ipairs(overlap) do
+		if not part:IsDescendantOf(Character) and not part.Anchored then
+			local v = part.AssemblyLinearVelocity
+			local speed = v.Magnitude
+			if speed >= CONFIG.SpiderSense.ProjectileSpeedThresh then
+				local toPlayer = origin - part.Position
+				local approach = v.Unit:Dot(safeUnit(toPlayer, Vector3.yAxis))
+				if approach > 0.72 then
+					local eta = toPlayer.Magnitude / speed
+					if eta < minTime and eta < 1.4 then
+						minTime = eta
+						dangerFound = true
+						closestThreat = part
+					end
+				end
+			end
+		end
+	end
+
+	State.DangerDetected = dangerFound
+	State.ThreatPart = closestThreat
+	State.ThreatPosition = closestThreat and closestThreat.Position or nil
+
+	if UI.SpiderSenseGui then
+		UI.SpiderSenseGui.Enabled = dangerFound
+	end
+end
+
+local function performSpiderSenseDodge()
+	if not RootPart or not Humanoid then return end
+	if not isCooldownReady("Dodge") or State.IsDodging then return end
+
+	setCooldown("Dodge", CONFIG.SpiderSense.DodgeCooldown)
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+
+	State.IsDodging = true
+	playSwooshSound(1.22)
+
+	local moveInput = getWorldMoveDirection()
+	local dodgeDir = (moveInput.Magnitude > 0.05) and moveInput or (- safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, 1)))
+
+	if State.DangerDetected and State.ThreatPart and State.ThreatPart.Parent then
+		local threatPos = State.ThreatPart.Position
+		spawnShockwaveRing(RootPart.Position, Vector3.yAxis, 2, 18, 0.35, CONFIG.Visuals.SenseColor)
+
+		local wristAtt = PhysicsObjects.RightWristAttachment or PhysicsObjects.RootAttachment
+		local tempAtt = Instance.new("Attachment", State.ThreatPart)
+		local counterBeam = createWebBeam(wristAtt, tempAtt, 0.18, 0.12, CONFIG.Visuals.WebColor)
+		playWebSound(1.3)
+		wrapTargetInWebCocoon(State.ThreatPart)
+		State.ThreatPart.AssemblyLinearVelocity = -State.ThreatPart.AssemblyLinearVelocity * 0.85
+		Debris:AddItem(counterBeam, 0.25)
+		Debris:AddItem(tempAtt, 0.25)
+	end
+
+	local camRight = Camera.CFrame.RightVector
+	local sideDot = dodgeDir:Dot(camRight)
+	if sideDot > 0.45 then
+		performBodyFlip("SideRight")
+	elseif sideDot < -0.45 then
+		performBodyFlip("SideLeft")
+	elseif dodgeDir:Dot(Camera.CFrame.LookVector) < -0.25 then
+		performBodyFlip("Back")
+	else
+		performBodyFlip("Front")
+	end
+
+	local startTime = os.clock()
+	task.spawn(function()
+		while (os.clock() - startTime) < CONFIG.SpiderSense.DodgeDuration do
+			if not RootPart or State.IsSwinging or State.IsCrawling then break end
+			RootPart.AssemblyLinearVelocity = dodgeDir * CONFIG.SpiderSense.DodgeSpeed + Vector3.new(0, 14, 0)
+			RunService.Heartbeat:Wait()
+		end
+		State.IsDodging = false
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 9: WEB WINGS AERODYNAMIC GLIDING ([B])
+------------------------------------------------------------------------------------------------
+local function stopWebWings()
+	if not State.IsGliding then return end
+	State.IsGliding = false
+
+	if PhysicsObjects.GlideLinearVelocity then
+		PhysicsObjects.GlideLinearVelocity.Enabled = false
+	end
+	if PhysicsObjects.GlideAlignOrientation then
+		PhysicsObjects.GlideAlignOrientation.Enabled = false
+	end
+	if PhysicsObjects.LeftWingBeam then PhysicsObjects.LeftWingBeam:Destroy() PhysicsObjects.LeftWingBeam = nil end
+	if PhysicsObjects.RightWingBeam then PhysicsObjects.RightWingBeam:Destroy() PhysicsObjects.RightWingBeam = nil end
+	if PhysicsObjects.SpeedTrailRight then PhysicsObjects.SpeedTrailRight.Enabled = false end
+	if PhysicsObjects.SpeedTrailLeft then PhysicsObjects.SpeedTrailLeft.Enabled = false end
+
+	makeCharacterUpright()
+end
+
+local function toggleWebWings()
+	if State.IsGliding then
+		stopWebWings()
+		return
+	end
+	if not RootPart or not Humanoid or isGrounded() then return end
+
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+	stopBodyFlip()
+
+	State.IsGliding = true
+	Humanoid.AutoRotate = false
+	PhysicsObjects.GlideLinearVelocity.Enabled = true
+	PhysicsObjects.GlideAlignOrientation.Enabled = true
+
+	if PhysicsObjects.LeftWristAttachment and PhysicsObjects.RootAttachment then
+		PhysicsObjects.LeftWingBeam = createWebBeam(PhysicsObjects.LeftWristAttachment, PhysicsObjects.RootAttachment, 0.75, 1.35, CONFIG.Visuals.WebGlowColor)
+	end
+	if PhysicsObjects.RightWristAttachment and PhysicsObjects.RootAttachment then
+		PhysicsObjects.RightWingBeam = createWebBeam(PhysicsObjects.RightWristAttachment, PhysicsObjects.RootAttachment, 0.75, 1.35, CONFIG.Visuals.WebGlowColor)
+	end
+
+	if PhysicsObjects.SpeedTrailRight then PhysicsObjects.SpeedTrailRight.Enabled = true end
+	if PhysicsObjects.SpeedTrailLeft then PhysicsObjects.SpeedTrailLeft.Enabled = true end
+	playWhooshSound(1.05)
+end
+
+local function updateWebWingsPhysics(dt)
+	if not State.IsGliding or not RootPart or not Humanoid then return end
+	if isGrounded() then
+		stopWebWings()
+		return
+	end
+
+	local camLook = Camera.CFrame.LookVector
+	local pitch = clamp(camLook.Y, -0.75, 0.45)
+	local speedMult = 1 + (-pitch * 0.45)
+	local forwardSpeed = CONFIG.WebWings.ForwardGlideSpeed * speedMult * (State.IsSurgeActive and CONFIG.Ultimates.SurgeSpeedMultiplier or 1)
+	local verticalVel = CONFIG.WebWings.DescentRate + (pitch * CONFIG.WebWings.PitchSensitivity)
+
+	local flatLook = safeUnit(Vector3.new(camLook.X, 0, camLook.Z), Vector3.new(0, 0, -1))
+	local glideVel = flatLook * forwardSpeed + Vector3.new(0, verticalVel, 0)
+
+	PhysicsObjects.GlideLinearVelocity.VectorVelocity = glideVel
+	PhysicsObjects.GlideAlignOrientation.CFrame = CFrame.lookAt(RootPart.Position, RootPart.Position + glideVel.Unit) * CFrame.Angles(math.rad(-68), 0, 0)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 10: CHARGED SUPER JUMP & DOUBLE JUMP ([Space])
+------------------------------------------------------------------------------------------------
+local function startJumpCharge()
+	if not RootPart or not Humanoid then return end
+
+	if State.PointLaunchReady and (os.clock() <= State.PointLaunchExpire) then
+		State.PointLaunchReady = false
+		local look = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+		RootPart.AssemblyLinearVelocity = look * CONFIG.WebZip.PointLaunchForward + Vector3.new(0, CONFIG.WebZip.PointLaunchUp, 0)
+		spawnShockwaveRing(RootPart.Position, Vector3.yAxis, 2, 18, 0.35, CONFIG.Visuals.WebGlowColor)
+		playWhooshSound(1.25)
+		performBodyFlip("Front")
+		return
+	end
+
+	if State.IsCrawling then
+		local jumpNormal = State.CrawlNormal
+		stopCrawl()
+		RootPart.AssemblyLinearVelocity = jumpNormal * CONFIG.Crawl.WallJumpAway + Vector3.new(0, CONFIG.Crawl.WallJumpUp, 0)
+		playWhooshSound(1.15)
+		performBodyFlip("Back")
+		return
+	end
+
+	if State.IsHanging then
+		stopWebHang()
+		RootPart.AssemblyLinearVelocity = Vector3.new(0, 46, 0) + Camera.CFrame.LookVector * 26
+		performBodyFlip("Front")
+		return
+	end
+
+	if not isGrounded() and not State.IsSwinging and State.CanDoubleJump and not State.HasDoubleJumped then
+		State.HasDoubleJumped = true
+		local moveDir = getWorldMoveDirection()
+		if moveDir.Magnitude < 0.05 then
+			moveDir = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1))
+		end
+		RootPart.AssemblyLinearVelocity = Vector3.new(RootPart.AssemblyLinearVelocity.X * 0.5, 0, RootPart.AssemblyLinearVelocity.Z * 0.5)
+			+ moveDir * CONFIG.Jump.DoubleJumpForward
+			+ Vector3.new(0, CONFIG.Jump.DoubleJumpUp, 0)
+		spawnShockwaveRing(RootPart.Position - Vector3.new(0, 2, 0), Vector3.yAxis, 1.5, 11, 0.30, CONFIG.Visuals.WebGlowColor)
+		playSwooshSound(1.2)
+		performBodyFlip("Front")
+		return
+	end
+
+	if isGrounded() then
+		State.IsChargingJump = true
+		State.JumpChargeStart = os.clock()
+	end
+end
+
+local function releaseJumpCharge()
+	if not State.IsChargingJump then return end
+	State.IsChargingJump = false
+
+	if not RootPart or not Humanoid or not isGrounded() then return end
+	local chargeTime = os.clock() - State.JumpChargeStart
+	local alpha = clamp(chargeTime / CONFIG.Jump.MaxChargeTime, 0, 1)
+
+	if alpha > 0.22 then
+		local jumpPower = lerp(CONFIG.Jump.BaseJumpPower, CONFIG.Jump.MaxChargedJumpPower, alpha)
+		local forwardBoost = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), Vector3.new(0, 0, -1)) * (26 * alpha)
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		RootPart.AssemblyLinearVelocity = Vector3.new(RootPart.AssemblyLinearVelocity.X, jumpPower, RootPart.AssemblyLinearVelocity.Z) + forwardBoost
+		spawnShockwaveRing(RootPart.Position - Vector3.new(0, 2.5, 0), Vector3.yAxis, 2, 18 * alpha + 6, 0.38, CONFIG.Visuals.WebGlowColor)
+		playWhooshSound(0.95)
+		addCameraShake(0.42 * alpha)
+		State.CanDoubleJump = true
+		State.HasDoubleJumped = false
+		State.AirZipCount = 0
+		if alpha > 0.5 then
+			performBodyFlip("Front")
+		end
+	end
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 11: 4-HIT ACROBATIC MELEE COMBAT & WEB STRIKE GAP-CLOSER ([M] / LMB)
+------------------------------------------------------------------------------------------------
+local function findNearestCombatTarget(maxRange)
+	if not RootPart then return nil, nil end
+	local origin = RootPart.Position
+	local camLook = Camera.CFrame.LookVector
+	local bestModel = nil
+	local bestRoot = nil
+	local bestScore = -math.huge
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("Humanoid") and obj.Health > 0 and obj.Parent ~= Character then
+			local model = obj.Parent
+			local r = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso")
+			if r then
+				local toTarget = r.Position - origin
+				local dist = toTarget.Magnitude
+				if dist <= maxRange then
+					local align = camLook:Dot(toTarget.Unit)
+					if align > 0.35 or dist < 12 then
+						local score = align * 50 - dist * 0.5
+						if score > bestScore then
+							bestScore = score
+							bestModel = model
+							bestRoot = r
+						end
+					end
+				end
+			end
+		end
+	end
+	return bestModel, bestRoot
+end
+
+local function performCombatAttack()
+	if not RootPart or not Humanoid then return end
+	if not isCooldownReady("Combat") or State.IsAttacking then return end
+
+	setCooldown("Combat", CONFIG.Combat.AttackCooldown)
+
+	if (os.clock() - State.LastCombatTime) > CONFIG.Combat.ComboResetTime then
+		State.ComboStep = 1
+	end
+	State.LastCombatTime = os.clock()
+
+	local _, targetRoot = findNearestCombatTarget(CONFIG.Combat.WebStrikeRange)
+
+	-- Ranged Web Strike Gap-Closer (Uses Custom WEB_ZIP_ANIM)
+	if targetRoot and (targetRoot.Position - RootPart.Position).Magnitude > CONFIG.Combat.HitRange then
+		State.IsAttacking = true
+		local wristAtt = PhysicsObjects.RightWristAttachment or PhysicsObjects.RootAttachment
+		local tempAtt = Instance.new("Attachment", targetRoot)
+		local strikeBeam = createWebBeam(wristAtt, tempAtt, 0.20, 0.14)
+		playWebSound(1.2)
+		playWhooshSound(1.25)
+		playAnim("WebZip", 0.05, 1.25)
+
+		local startT = os.clock()
+		while targetRoot and targetRoot.Parent and (os.clock() - startT) < 0.42 do
+			local toEnemy = targetRoot.Position - RootPart.Position
+			if toEnemy.Magnitude <= 6.5 then break end
+			RootPart.AssemblyLinearVelocity = toEnemy.Unit * CONFIG.Combat.WebStrikeSpeed
+			RunService.Heartbeat:Wait()
+		end
+
+		if strikeBeam then strikeBeam:Destroy() end
+		if tempAtt then tempAtt:Destroy() end
+		stopAnim("WebZip", 0.12)
+
+		if targetRoot and targetRoot.Parent then
+			playImpactSound(1.1)
+			addCameraShake(0.48)
+			spawnShockwaveRing(targetRoot.Position, (targetRoot.Position - RootPart.Position).Unit, 1.5, 10, 0.25, CONFIG.Visuals.WebGlowColor)
+			targetRoot.AssemblyLinearVelocity = (RootPart.CFrame.LookVector * CONFIG.Combat.KnockbackForce) + Vector3.new(0, 26, 0)
+			RootPart.AssemblyLinearVelocity = Vector3.new(0, 32, 0) - RootPart.CFrame.LookVector * 14
+			performBodyFlip("Back")
+		end
+		State.IsAttacking = false
+		return
+	end
+
+	-- Close-Quarters 4-Hit Combo
+	State.IsAttacking = true
+	local step = State.ComboStep
+	State.ComboStep = (step % 4) + 1
+
+	playSwooshSound(1.0 + step * 0.08)
+
+	local forwardDir = safeUnit(Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z), RootPart.CFrame.LookVector)
+	RootPart.CFrame = CFrame.lookAt(RootPart.Position, RootPart.Position + forwardDir)
+	RootPart.AssemblyLinearVelocity = forwardDir * 24 + Vector3.new(0, (step == 4) and 28 or 4, 0)
+
+	if step == 4 then
+		performBodyFlip("Front")
+	end
+
+	local hitCenter = RootPart.Position + forwardDir * 5.5
+	local hitColor = (step == 4 or State.IsSurgeActive) and CONFIG.Visuals.VenomColor or CONFIG.Visuals.WebGlowColor
+	spawnShockwaveRing(hitCenter, forwardDir, 1.2, (step == 4) and 13 or 7.5, 0.22, hitColor)
+
+	if step == 4 or State.IsSurgeActive then
+		spawnLightningArc(RootPart.Position, hitCenter + Vector3.new(0, 2, 0), CONFIG.Visuals.VenomColor, 0.25, 0.22)
+	end
+
+	local parts = Workspace:GetPartBoundsInRadius(hitCenter, CONFIG.Combat.HitRange * 0.65)
+	local hitAny = false
+	for _, p in ipairs(parts) do
+		if not p:IsDescendantOf(Character) and not p.Anchored then
+			hitAny = true
+			local knock = (step == 4) and CONFIG.Combat.FinisherKnockback or CONFIG.Combat.KnockbackForce
+			p.AssemblyLinearVelocity = forwardDir * knock + Vector3.new(0, (step == 4) and 42 or 16, 0)
+		end
+	end
+	if hitAny then
+		playImpactSound(1.0 + step * 0.05)
+		addCameraShake((step == 4) and 0.65 or 0.30)
+	end
+
+	task.delay(0.18, function()
+		State.IsAttacking = false
+	end)
+end
+
+------------------------------------------------------------------------------------------------
+-- SYSTEM 12: LOWER-RIGHT CIRCULAR ICON-ONLY HUD + SPIDER-TECH SETTINGS TAB
+------------------------------------------------------------------------------------------------
+local ABILITY_DEFINITIONS = {
+	-- Row 1: Core Traversal
+	{ Id = "Swing",       Icon = "🕸️", Row = 1, Col = 1, Hold = true },
+	{ Id = "WebZip",      Icon = "⚡",  Row = 1, Col = 2, Hold = false },
+	{ Id = "Slingshot",   Icon = "🏹", Row = 1, Col = 3, Hold = true },
+
+	-- Row 2: Surface, Jump & Flip
+	{ Id = "Crawl",       Icon = "🕷️", Row = 2, Col = 1, Hold = false },
+	{ Id = "SuperJump",   Icon = "🚀", Row = 2, Col = 2, Hold = true },
+	{ Id = "Acrobatics",  Icon = "🤸", Row = 2, Col = 3, Hold = false },
+
+	-- Row 3: Web Gadgets
+	{ Id = "WebShoot",    Icon = "🎯", Row = 3, Col = 1, Hold = false },
+	{ Id = "WebPull",     Icon = "🧲", Row = 3, Col = 2, Hold = false },
+	{ Id = "WebBomb",     Icon = "💣", Row = 3, Col = 3, Hold = false },
+
+	-- Row 4: Bio-Electric & Defense
+	{ Id = "VenomSmash",  Icon = "🌩️", Row = 4, Col = 1, Hold = false },
+	{ Id = "WebBlossom",  Icon = "🌪️", Row = 4, Col = 2, Hold = false },
+	{ Id = "WebShield",   Icon = "🛡️", Row = 4, Col = 3, Hold = true },
+
+	-- Row 5: Tactical & Aerial
+	{ Id = "SpiderSense", Icon = "⚠️", Row = 5, Col = 1, Hold = false },
+	{ Id = "WebHang",     Icon = "🪝", Row = 5, Col = 2, Hold = false },
+	{ Id = "WebWings",    Icon = "🦅", Row = 5, Col = 3, Hold = false },
+
+	-- Row 6: Combat, Surge & Settings Tab
+	{ Id = "Combat",      Icon = "👊", Row = 6, Col = 1, Hold = false },
+	{ Id = "SurgeMode",   Icon = "🔥", Row = 6, Col = 2, Hold = false },
+	{ Id = "Settings",    Icon = "⚙️", Row = 6, Col = 3, Hold = false },
+}
+
+local function cancelAllStates()
+	stopSwing(false)
+	stopCrawl()
+	stopWebHang()
+	stopWebWings()
+	stopBodyFlip()
+	toggleWebShield(false)
+	cleanupSlingshotVisuals()
+	State.IsChargingSling = false
+	State.IsChargingJump = false
+	State.IsWebZipping = false
+	stopAnim("WebZip", 0.1)
+	makeCharacterUpright()
+end
+
+local function toggleSettingsTab(forceState)
+	if not UI.SettingsPanel then return end
+	if forceState ~= nil then
+		State.IsSettingsOpen = forceState
+	else
+		State.IsSettingsOpen = not State.IsSettingsOpen
+	end
+
+	playSwooshSound(State.IsSettingsOpen and 1.25 or 0.95)
+
+	if State.IsSettingsOpen then
+		UI.SettingsPanel.Visible = true
+		UI.SettingsPanel.Size = UDim2.new(0, 340, 0, 0)
+		TweenService:Create(UI.SettingsPanel, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Size = UDim2.new(0, 340, 0, 345),
+		}):Play()
+	else
+		local closeTween = TweenService:Create(UI.SettingsPanel, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Size = UDim2.new(0, 340, 0, 0),
+		})
+		closeTween:Play()
+		closeTween.Completed:Connect(function()
+			if not State.IsSettingsOpen and UI.SettingsPanel then
+				UI.SettingsPanel.Visible = false
+			end
+		end)
+	end
+end
+
+local function triggerAbilityInput(abilityId, isPressed)
+	if abilityId == "Swing" then
+		if isPressed then startSwing() else stopSwing(true) end
+	elseif abilityId == "Crawl" and isPressed then
+		if State.IsCrawling then stopCrawl() else snapAndStartCrawl() end
+	elseif abilityId == "WebZip" and isPressed then
+		performWebZip()
+	elseif abilityId == "Slingshot" then
+		if isPressed then startSlingshotCharge() else releaseSlingshot() end
+	elseif abilityId == "SuperJump" then
+		if isPressed then startJumpCharge() else releaseJumpCharge() end
+	elseif abilityId == "Acrobatics" and isPressed then
+		if State.IsSwinging then
+			stopSwing(true)
+			if not SETTINGS.SwingFrontFlip then
+				performBodyFlip("Front")
+			end
+		else
+			performBodyFlip("Front")
+		end
+	elseif abilityId == "WebShoot" and isPressed then
+		fireWebProjectile()
+	elseif abilityId == "WebPull" and isPressed then
+		performWebPull()
+	elseif abilityId == "WebBomb" and isPressed then
+		throwWebBomb()
+	elseif abilityId == "WebShield" then
+		toggleWebShield(isPressed)
+	elseif abilityId == "VenomSmash" and isPressed then
+		performVenomSmash()
+	elseif abilityId == "WebBlossom" and isPressed then
+		performWebBlossom()
+	elseif abilityId == "SurgeMode" and isPressed then
+		activateSurgeMode()
+	elseif abilityId == "SpiderSense" and isPressed then
+		performSpiderSenseDodge()
+	elseif abilityId == "WebHang" and isPressed then
+		toggleWebHang()
+	elseif abilityId == "WebWings" and isPressed then
+		toggleWebWings()
+	elseif abilityId == "Combat" and isPressed then
+		performCombatAttack()
+	elseif abilityId == "Settings" and isPressed then
+		toggleSettingsTab()
+	elseif abilityId == "Cancel" and isPressed then
+		cancelAllStates()
+	end
+end
+
+local function buildHUD()
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+	local existing = playerGui:FindFirstChild("SpiderManHUD")
+	if existing then existing:Destroy() end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "SpiderManHUD"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.IgnoreGuiInset = true
+	screenGui.Parent = playerGui
+	UI.ScreenGui = screenGui
+
+	-- 1. Minimalist Web Fluid Bar (Bottom-Left, No Text Labels)
+	local barFrame = Instance.new("Frame")
+	barFrame.Name = "WebFluidContainer"
+	barFrame.Size = UDim2.new(0, 195, 0, 12)
+	barFrame.Position = UDim2.new(0, 24, 1, -34)
+	barFrame.BackgroundColor3 = Color3.fromRGB(16, 20, 30)
+	barFrame.BackgroundTransparency = 0.2
+	barFrame.BorderSizePixel = 0
+	barFrame.Parent = screenGui
+
+	local barCorner = Instance.new("UICorner")
+	barCorner.CornerRadius = UDim.new(1, 0)
+	barCorner.Parent = barFrame
+
+	local barStroke = Instance.new("UIStroke")
+	barStroke.Color = CONFIG.Visuals.PrimaryColor
+	barStroke.Thickness = 1.6
+	barStroke.Transparency = 0.25
+	barStroke.Parent = barFrame
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "Fill"
+	barFill.Size = UDim2.new(1, 0, 1, 0)
+	barFill.BackgroundColor3 = CONFIG.Visuals.WebGlowColor
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barFrame
+	UI.FluidBarFill = barFill
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = barFill
+
+	-- 2. Spider-Sense Screen Halo Ring
+	local senseRing = Instance.new("Frame")
+	senseRing.Name = "SpiderSenseHalo"
+	senseRing.Size = UDim2.new(0, 260, 0, 260)
+	senseRing.Position = UDim2.new(0.5, -130, 0.5, -130)
+	senseRing.BackgroundTransparency = 1
+	senseRing.Visible = false
+	senseRing.Parent = screenGui
+
+	local senseCorner = Instance.new("UICorner")
+	senseCorner.CornerRadius = UDim.new(1, 0)
+	senseCorner.Parent = senseRing
+
+	local senseStroke = Instance.new("UIStroke")
+	senseStroke.Color = CONFIG.Visuals.SenseColor
+	senseStroke.Thickness = 4
+	senseStroke.Transparency = 0.15
+	senseStroke.Parent = senseRing
+	UI.SpiderSenseGui = senseRing
+
+	-- 3. Lower-Right Circular Icon-Only Buttons (Fixed Position, No Text Names)
+	local btnSize = 50
+	local gap = 9
+	local cols = 3
+	local rows = 6
+	local totalW = cols * btnSize + (cols - 1) * gap
+	local totalH = rows * btnSize + (rows - 1) * gap
+
+	local gridHolder = Instance.new("Frame")
+	gridHolder.Name = "LowerRightAbilityDock"
+	gridHolder.Size = UDim2.new(0, totalW, 0, totalH)
+	gridHolder.Position = UDim2.new(1, -(totalW + 18), 1, -(totalH + 22))
+	gridHolder.BackgroundTransparency = 1
+	gridHolder.Parent = screenGui
+
+	for _, def in ipairs(ABILITY_DEFINITIONS) do
+		local xPos = (def.Col - 1) * (btnSize + gap)
+		local yPos = (def.Row - 1) * (btnSize + gap)
+
+		local btn = Instance.new("TextButton")
+		btn.Name = "Btn_" .. def.Id
+		btn.Size = UDim2.new(0, btnSize, 0, btnSize)
+		btn.Position = UDim2.new(0, xPos, 0, yPos)
+		btn.BackgroundColor3 = Color3.fromRGB(16, 22, 34)
+		btn.BackgroundTransparency = 0.22
+		btn.Text = def.Icon
+		btn.TextSize = 22
+		btn.Font = Enum.Font.GothamBold
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.AutoButtonColor = false
+		btn.Parent = gridHolder
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = btn
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = CONFIG.Visuals.PrimaryColor
+		stroke.Thickness = 2
+		stroke.Transparency = 0.2
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Parent = btn
+
+		btn.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				triggerAbilityInput(def.Id, true)
+			end
+		end)
+
+		btn.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				if def.Hold then
+					triggerAbilityInput(def.Id, false)
+				end
+			end
+		end)
+
+		UI.Buttons[def.Id] = {
+			Button = btn,
+			Stroke = stroke,
+		}
+	end
+
+	-- 4. Interactive Spider-Tech Settings Tab Modal (Anchored near Bottom-Right Dock)
+	local settingsPanel = Instance.new("Frame")
+	settingsPanel.Name = "SpiderTechSettingsTab"
+	settingsPanel.Size = UDim2.new(0, 340, 0, 345)
+	settingsPanel.Position = UDim2.new(1, -(totalW + 372), 1, -367)
+	settingsPanel.BackgroundColor3 = Color3.fromRGB(12, 16, 26)
+	settingsPanel.BackgroundTransparency = 0.08
+	settingsPanel.ClipsDescendants = true
+	settingsPanel.Visible = false
+	settingsPanel.Parent = screenGui
+	UI.SettingsPanel = settingsPanel
+
+	local panelCorner = Instance.new("UICorner")
+	panelCorner.CornerRadius = UDim.new(0, 16)
+	panelCorner.Parent = settingsPanel
+
+	local panelStroke = Instance.new("UIStroke")
+	panelStroke.Color = CONFIG.Visuals.PrimaryColor
+	panelStroke.Thickness = 2.2
+	panelStroke.Transparency = 0.15
+	panelStroke.Parent = settingsPanel
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0, 44)
+	header.BackgroundColor3 = Color3.fromRGB(22, 28, 44)
+	header.BackgroundTransparency = 0.2
+	header.BorderSizePixel = 0
+	header.Parent = settingsPanel
+
+	local headerCorner = Instance.new("UICorner")
+	headerCorner.CornerRadius = UDim.new(0, 16)
+	headerCorner.Parent = header
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(1, -55, 1, 0)
+	titleLabel.Position = UDim2.new(0, 16, 0, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "⚙️ SPIDER-TECH SETTINGS"
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextSize = 15
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Parent = header
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 30, 0, 30)
+	closeBtn.Position = UDim2.new(1, -38, 0.5, -15)
+	closeBtn.BackgroundColor3 = CONFIG.Visuals.PrimaryColor
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 14
+	closeBtn.Parent = header
+
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(1, 0)
+	closeCorner.Parent = closeBtn
+
+	closeBtn.Activated:Connect(function()
+		toggleSettingsTab(false)
+	end)
+
+	local listHolder = Instance.new("Frame")
+	listHolder.Size = UDim2.new(1, -24, 1, -56)
+	listHolder.Position = UDim2.new(0, 12, 0, 50)
+	listHolder.BackgroundTransparency = 1
+	listHolder.Parent = settingsPanel
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 7)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = listHolder
+
+	local settingDefinitions = {
+		{ Key = "BuildingDetection",  Title = "Building Detection",        Sub = "Snap web swings to real buildings & ledges" },
+		{ Key = "SwingFrontFlip",     Title = "Front Flip While Swinging", Sub = "360° front flip on swing release & vaults" },
+		{ Key = "StrictBuildingOnly", Title = "Strict Building Mode",      Sub = "Require buildings to swing (no sky anchor)" },
+		{ Key = "WebTargetReticle",   Title = "Building Target Reticle",   Sub = "Show 3D lock-on reticle on anchor points" },
+		{ Key = "DynamicCameraFX",    Title = "Dynamic Camera FX",         Sub = "Speed FOV warp, banking & impact shake" },
+		{ Key = "AutoSpiderSense",    Title = "Auto Spider-Sense",         Sub = "Automatic danger halo & reflex detection" },
+	}
+
+	for idx, sDef in ipairs(settingDefinitions) do
+		local row = Instance.new("Frame")
+		row.LayoutOrder = idx
+		row.Size = UDim2.new(1, 0, 0, 42)
+		row.BackgroundColor3 = Color3.fromRGB(20, 26, 40)
+		row.BackgroundTransparency = 0.25
+		row.BorderSizePixel = 0
+		row.Parent = listHolder
+
+		local rowCorner = Instance.new("UICorner")
+		rowCorner.CornerRadius = UDim.new(0, 10)
+		rowCorner.Parent = row
+
+		local rowTitle = Instance.new("TextLabel")
+		rowTitle.Size = UDim2.new(1, -76, 0, 20)
+		rowTitle.Position = UDim2.new(0, 12, 0, 4)
+		rowTitle.BackgroundTransparency = 1
+		rowTitle.Text = sDef.Title
+		rowTitle.TextColor3 = Color3.fromRGB(245, 248, 255)
+		rowTitle.Font = Enum.Font.GothamBold
+		rowTitle.TextSize = 13
+		rowTitle.TextXAlignment = Enum.TextXAlignment.Left
+		rowTitle.Parent = row
+
+		local rowSub = Instance.new("TextLabel")
+		rowSub.Size = UDim2.new(1, -76, 0, 16)
+		rowSub.Position = UDim2.new(0, 12, 0, 22)
+		rowSub.BackgroundTransparency = 1
+		rowSub.Text = sDef.Sub
+		rowSub.TextColor3 = Color3.fromRGB(160, 175, 200)
+		rowSub.Font = Enum.Font.Gotham
+		rowSub.TextSize = 10
+		rowSub.TextXAlignment = Enum.TextXAlignment.Left
+		rowSub.Parent = row
+
+		local toggleBtn = Instance.new("TextButton")
+		toggleBtn.Size = UDim2.new(0, 50, 0, 26)
+		toggleBtn.Position = UDim2.new(1, -60, 0.5, -13)
+		toggleBtn.Text = ""
+		toggleBtn.AutoButtonColor = false
+		toggleBtn.Parent = row
+
+		local tCorner = Instance.new("UICorner")
+		tCorner.CornerRadius = UDim.new(1, 0)
+		tCorner.Parent = toggleBtn
+
+		local knob = Instance.new("Frame")
+		knob.Size = UDim2.new(0, 20, 0, 20)
+		knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		knob.BorderSizePixel = 0
+		knob.Parent = toggleBtn
+
+		local kCorner = Instance.new("UICorner")
+		kCorner.CornerRadius = UDim.new(1, 0)
+		kCorner.Parent = knob
+
+		local function refreshToggleVisual(animate)
+			local isOn = SETTINGS[sDef.Key]
+			local targetColor = isOn and CONFIG.Visuals.PrimaryColor or Color3.fromRGB(52, 60, 78)
+			local targetPos = isOn and UDim2.new(1, -23, 0.5, -10) or UDim2.new(0, 3, 0.5, -10)
+			if animate then
+				TweenService:Create(toggleBtn, TweenInfo.new(0.15), { BackgroundColor3 = targetColor }):Play()
+				TweenService:Create(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Position = targetPos }):Play()
+			else
+				toggleBtn.BackgroundColor3 = targetColor
+				knob.Position = targetPos
+			end
+		end
+
+		refreshToggleVisual(false)
+
+		toggleBtn.Activated:Connect(function()
+			SETTINGS[sDef.Key] = not SETTINGS[sDef.Key]
+			playWebSound(SETTINGS[sDef.Key] and 1.25 or 0.92)
+			refreshToggleVisual(true)
+		end)
+
+		UI.SettingToggles[sDef.Key] = refreshToggleVisual
+	end
+end
+
+local function updateHUDVisuals(dt)
+	if UI.FluidBarFill then
+		local ratio = clamp(State.WebFluid / CONFIG.Gadgets.MaxWebFluid, 0, 1)
+		UI.FluidBarFill.Size = UI.FluidBarFill.Size:Lerp(UDim2.new(ratio, 0, 1, 0), clamp(dt * 12, 0, 1))
+		UI.FluidBarFill.BackgroundColor3 = State.IsSurgeActive and CONFIG.Visuals.VenomColor or CONFIG.Visuals.WebGlowColor
+	end
+
+	local activeMap = {
+		Swing       = State.IsSwinging,
+		Crawl       = State.IsCrawling,
+		WebZip      = State.IsWebZipping,
+		Slingshot   = State.IsChargingSling,
+		SuperJump   = State.IsChargingJump,
+		Acrobatics  = State.IsFlipping,
+		WebShield   = State.IsShielding,
+		VenomSmash  = State.IsVenomSmashing,
+		WebBlossom  = State.IsBlossoming,
+		SurgeMode   = State.IsSurgeActive,
+		SpiderSense = State.DangerDetected or State.IsDodging,
+		WebHang     = State.IsHanging,
+		WebWings    = State.IsGliding,
+		Combat      = State.IsAttacking,
+		Settings    = State.IsSettingsOpen,
+	}
+
+	for id, data in pairs(UI.Buttons) do
+		local isActive = activeMap[id] == true
+		data.Button.BackgroundColor3 = isActive and CONFIG.Visuals.PrimaryColor or Color3.fromRGB(16, 22, 34)
+		data.Stroke.Color = isActive and Color3.fromRGB(255, 255, 255) or CONFIG.Visuals.PrimaryColor
+	end
+end
+
+------------------------------------------------------------------------------------------------
+-- CHARACTER SETUP & PHYSICS RIGGING
+------------------------------------------------------------------------------------------------
+local function cleanupCharacterObjects()
+	cancelAllStates()
+	for _, conn in ipairs(Connections) do
+		conn:Disconnect()
+	end
+	table.clear(Connections)
+
+	if VFXFolder then
+		VFXFolder:ClearAllChildren()
+	end
+end
+
+local function setupCharacter(char)
+	cleanupCharacterObjects()
+
+	Character = char
+	Humanoid = char:WaitForChild("Humanoid", 10)
+	RootPart = char:WaitForChild("HumanoidRootPart", 10)
+	if not Humanoid or not RootPart then return end
+
+	IsR15 = (Humanoid.RigType == Enum.HumanoidRigType.R15)
+
+	Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+	Humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+
+	Limbs.Head = char:FindFirstChild("Head")
+	if IsR15 then
+		Limbs.Torso     = char:FindFirstChild("UpperTorso") or RootPart
+		Limbs.RightArm  = char:FindFirstChild("RightLowerArm") or char:FindFirstChild("RightUpperArm")
+		Limbs.LeftArm   = char:FindFirstChild("LeftLowerArm") or char:FindFirstChild("LeftUpperArm")
+		Limbs.RightHand = char:FindFirstChild("RightHand") or Limbs.RightArm
+		Limbs.LeftHand  = char:FindFirstChild("LeftHand") or Limbs.LeftArm
+		Limbs.RightLeg  = char:FindFirstChild("RightLowerLeg")
+		Limbs.LeftLeg   = char:FindFirstChild("LeftLowerLeg")
+	else
+		Limbs.Torso     = char:FindFirstChild("Torso") or RootPart
+		Limbs.RightArm  = char:FindFirstChild("Right Arm")
+		Limbs.LeftArm   = char:FindFirstChild("Left Arm")
+		Limbs.RightHand = Limbs.RightArm
+		Limbs.LeftHand  = Limbs.LeftArm
+		Limbs.RightLeg  = char:FindFirstChild("Right Leg")
+		Limbs.LeftLeg   = char:FindFirstChild("Left Leg")
+	end
+
+	local rootAtt = RootPart:FindFirstChild("RootAttachment")
+	if not rootAtt then
+		rootAtt = Instance.new("Attachment")
+		rootAtt.Name = "RootAttachment"
+		rootAtt.Parent = RootPart
+	end
+	PhysicsObjects.RootAttachment = rootAtt
+
+	local topHangAtt = Instance.new("Attachment")
+	topHangAtt.Name = "TopHangAttachment"
+	topHangAtt.Position = Vector3.new(0, 2.6, 0)
+	topHangAtt.Parent = RootPart
+	PhysicsObjects.TopHangAttachment = topHangAtt
+
+	PhysicsObjects.RightShooterModel, PhysicsObjects.RightWristAttachment = create3DWebShooter(Limbs.RightHand, true)
+	PhysicsObjects.LeftShooterModel, PhysicsObjects.LeftWristAttachment = create3DWebShooter(Limbs.LeftHand, false)
+	createAnchorReticle()
+
+	-- Swing Physics Instances
+	local swingAnchorPart = Instance.new("Part")
+	swingAnchorPart.Name = "SpiderSwingAnchor"
+	swingAnchorPart.Size = Vector3.new(0.4, 0.4, 0.4)
+	swingAnchorPart.Anchored = true
+	swingAnchorPart.CanCollide = false
+	swingAnchorPart.CanQuery = false
+	swingAnchorPart.CanTouch = false
+	swingAnchorPart.Transparency = 1
+	swingAnchorPart.Parent = ensureVFXFolder()
+	PhysicsObjects.SwingAnchorPart = swingAnchorPart
+
+	local swingAnchorAtt = Instance.new("Attachment", swingAnchorPart)
+	PhysicsObjects.SwingAnchorAttachment = swingAnchorAtt
+
+	local swingRope = Instance.new("RopeConstraint")
+	swingRope.Name = "SpiderSwingRope"
+	swingRope.Attachment0 = rootAtt
+	swingRope.Attachment1 = swingAnchorAtt
+	swingRope.Restitution = 0.05
+	swingRope.Visible = false
+	swingRope.Enabled = false
+	swingRope.Parent = RootPart
+	PhysicsObjects.SwingRope = swingRope
+
+	local swingVF = Instance.new("VectorForce")
+	swingVF.Name = "SpiderSwingForce"
+	swingVF.Attachment0 = rootAtt
+	swingVF.RelativeTo = Enum.ActuatorRelativeTo.World
+	swingVF.ApplyAtCenterOfMass = true
+	swingVF.Force = Vector3.zero
+	swingVF.Enabled = false
+	swingVF.Parent = RootPart
+	PhysicsObjects.SwingVectorForce = swingVF
+
+	local swingAlign = Instance.new("AlignOrientation")
+	swingAlign.Name = "SpiderSwingAlign"
+	swingAlign.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	swingAlign.Attachment0 = rootAtt
+	swingAlign.MaxTorque = 450000
+	swingAlign.Responsiveness = 26
+	swingAlign.Enabled = false
+	swingAlign.Parent = RootPart
+	PhysicsObjects.SwingAlignOrientation = swingAlign
+
+	-- Wall Crawl Physics Instances
+	local crawlLV = Instance.new("LinearVelocity")
+	crawlLV.Name = "SpiderCrawlVelocity"
+	crawlLV.Attachment0 = rootAtt
+	crawlLV.RelativeTo = Enum.ActuatorRelativeTo.World
+	crawlLV.MaxForce = 450000
+	crawlLV.VectorVelocity = Vector3.zero
+	crawlLV.Enabled = false
+	crawlLV.Parent = RootPart
+	PhysicsObjects.CrawlLinearVelocity = crawlLV
+
+	local crawlAlign = Instance.new("AlignOrientation")
+	crawlAlign.Name = "SpiderCrawlAlign"
+	crawlAlign.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	crawlAlign.Attachment0 = rootAtt
+	crawlAlign.MaxTorque = 500000
+	crawlAlign.Responsiveness = 38
+	crawlAlign.Enabled = false
+	crawlAlign.Parent = RootPart
+	PhysicsObjects.CrawlAlignOrientation = crawlAlign
+
+	-- Web Hang Physics Instances
+	local hangAnchorPart = Instance.new("Part")
+	hangAnchorPart.Name = "SpiderHangAnchor"
+	hangAnchorPart.Size = Vector3.new(0.4, 0.4, 0.4)
+	hangAnchorPart.Anchored = true
+	hangAnchorPart.CanCollide = false
+	hangAnchorPart.CanQuery = false
+	hangAnchorPart.CanTouch = false
+	hangAnchorPart.Transparency = 1
+	hangAnchorPart.Parent = ensureVFXFolder()
+	PhysicsObjects.HangAnchorPart = hangAnchorPart
+
+	local hangAnchorAtt = Instance.new("Attachment", hangAnchorPart)
+	PhysicsObjects.HangAnchorAttachment = hangAnchorAtt
+
+	local hangRope = Instance.new("RopeConstraint")
+	hangRope.Name = "SpiderHangRope"
+	hangRope.Attachment0 = topHangAtt
+	hangRope.Attachment1 = hangAnchorAtt
+	hangRope.Restitution = 0.05
+	hangRope.Visible = false
+	hangRope.Enabled = false
+	hangRope.Parent = RootPart
+	PhysicsObjects.HangRope = hangRope
+
+	local hangVF = Instance.new("VectorForce")
+	hangVF.Name = "SpiderHangForce"
+	hangVF.Attachment0 = rootAtt
+	hangVF.RelativeTo = Enum.ActuatorRelativeTo.World
+	hangVF.ApplyAtCenterOfMass = true
+	hangVF.Force = Vector3.zero
+	hangVF.Enabled = false
+	hangVF.Parent = RootPart
+	PhysicsObjects.HangVectorForce = hangVF
+
+	local hangLV = Instance.new("LinearVelocity")
+	hangLV.Name = "SpiderHangWinchVelocity"
+	hangLV.Attachment0 = rootAtt
+	hangLV.RelativeTo = Enum.ActuatorRelativeTo.World
+	hangLV.MaxForce = 350000
+	hangLV.VectorVelocity = Vector3.zero
+	hangLV.Enabled = false
+	hangLV.Parent = RootPart
+	PhysicsObjects.HangLinearVelocity = hangLV
+
+	local hangAlign = Instance.new("AlignOrientation")
+	hangAlign.Name = "SpiderHangAlign"
+	hangAlign.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	hangAlign.Attachment0 = rootAtt
+	hangAlign.MaxTorque = 420000
+	hangAlign.Responsiveness = 26
+	hangAlign.Enabled = false
+	hangAlign.Parent = RootPart
+	PhysicsObjects.HangAlignOrientation = hangAlign
+
+	-- Web Wings Physics Instances
+	local glideLV = Instance.new("LinearVelocity")
+	glideLV.Name = "SpiderGlideVelocity"
+	glideLV.Attachment0 = rootAtt
+	glideLV.RelativeTo = Enum.ActuatorRelativeTo.World
+	glideLV.MaxForce = 350000
+	glideLV.VectorVelocity = Vector3.zero
+	glideLV.Enabled = false
+	glideLV.Parent = RootPart
+	PhysicsObjects.GlideLinearVelocity = glideLV
+
+	local glideAlign = Instance.new("AlignOrientation")
+	glideAlign.Name = "SpiderGlideAlign"
+	glideAlign.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	glideAlign.Attachment0 = rootAtt
+	glideAlign.MaxTorque = 420000
+	glideAlign.Responsiveness = 28
+	glideAlign.Enabled = false
+	glideAlign.Parent = RootPart
+	PhysicsObjects.GlideAlignOrientation = glideAlign
+
+	setupSounds()
+	loadCharacterAnimations()
+	buildHUD()
+
+	-- Landing Detection Connection (Plays LANDING_ANIM = rbxassetid://115526680245169)
+	table.insert(Connections, Humanoid.StateChanged:Connect(function(_, newState)
+		if newState == Enum.HumanoidStateType.Landed then
+			State.CanDoubleJump = false
+			State.HasDoubleJumped = false
+			State.AirZipCount = 0
+
+			if State.IsFlipping then
+				stopBodyFlip()
+				makeCharacterUpright()
+			end
+
+			if State.LastVerticalSpeed <= CONFIG.Jump.LandingAnimVelocityThreshold then
+				playLandingAnimation()
+			end
+
+			if State.LastVerticalSpeed <= CONFIG.Jump.HardLandingVelocityThreshold then
+				playImpactSound(1.0)
+				addCameraShake(0.55)
+				spawnShockwaveRing(RootPart.Position - Vector3.new(0, 2.5, 0), Vector3.yAxis, 2, 18, 0.35, CONFIG.Visuals.WebGlowColor)
+				spawnAnchorWebSplat(RootPart.Position - Vector3.new(0, 2.8, 0), Vector3.yAxis, true)
+			end
+		elseif newState == Enum.HumanoidStateType.Freefall then
+			State.CanDoubleJump = true
+		end
+	end))
+
+	table.insert(Connections, Humanoid.Died:Connect(function()
+		cleanupCharacterObjects()
+	end))
+end
+
+------------------------------------------------------------------------------------------------
+-- INPUT HANDLING (PC KEYBINDS)
+------------------------------------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed or UserInputService:GetFocusedTextBox() then return end
+
+	local kc = input.KeyCode
+	local ut = input.UserInputType
+
+	if kc == CONFIG.Keybinds.Swing or kc == CONFIG.Keybinds.SwingAlt or kc == CONFIG.Keybinds.SwingExtra then
+		triggerAbilityInput("Swing", true)
+	elseif kc == CONFIG.Keybinds.Crawl then
+		triggerAbilityInput("Crawl", true)
+	elseif kc == CONFIG.Keybinds.WebZip then
+		triggerAbilityInput("WebZip", true)
+	elseif kc == CONFIG.Keybinds.Slingshot then
+		triggerAbilityInput("Slingshot", true)
+	elseif kc == CONFIG.Keybinds.SuperJump then
+		triggerAbilityInput("SuperJump", true)
+	elseif kc == CONFIG.Keybinds.Acrobatics then
+		triggerAbilityInput("Acrobatics", true)
+	elseif kc == CONFIG.Keybinds.WebShoot then
+		triggerAbilityInput("WebShoot", true)
+	elseif kc == CONFIG.Keybinds.WebPull then
+		triggerAbilityInput("WebPull", true)
+	elseif kc == CONFIG.Keybinds.WebBomb then
+		triggerAbilityInput("WebBomb", true)
+	elseif kc == CONFIG.Keybinds.WebShield then
+		triggerAbilityInput("WebShield", true)
+	elseif kc == CONFIG.Keybinds.VenomSmash then
+		triggerAbilityInput("VenomSmash", true)
+	elseif kc == CONFIG.Keybinds.WebBlossom then
+		triggerAbilityInput("WebBlossom", true)
+	elseif kc == CONFIG.Keybinds.SurgeMode then
+		triggerAbilityInput("SurgeMode", true)
+	elseif kc == CONFIG.Keybinds.SpiderSense then
+		triggerAbilityInput("SpiderSense", true)
+	elseif kc == CONFIG.Keybinds.WebHang then
+		triggerAbilityInput("WebHang", true)
+	elseif kc == CONFIG.Keybinds.WebWings then
+		triggerAbilityInput("WebWings", true)
+	elseif kc == CONFIG.Keybinds.Combat or ut == Enum.UserInputType.MouseButton1 then
+		triggerAbilityInput("Combat", true)
+	elseif kc == CONFIG.Keybinds.Settings then
+		triggerAbilityInput("Settings", true)
+	elseif kc == CONFIG.Keybinds.CancelAll then
+		triggerAbilityInput("Cancel", true)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	local kc = input.KeyCode
+	if kc == CONFIG.Keybinds.Swing or kc == CONFIG.Keybinds.SwingAlt or kc == CONFIG.Keybinds.SwingExtra then
+		triggerAbilityInput("Swing", false)
+	elseif kc == CONFIG.Keybinds.Slingshot then
+		triggerAbilityInput("Slingshot", false)
+	elseif kc == CONFIG.Keybinds.SuperJump then
+		triggerAbilityInput("SuperJump", false)
+	elseif kc == CONFIG.Keybinds.WebShield then
+		triggerAbilityInput("WebShield", false)
+	end
+end)
+
+------------------------------------------------------------------------------------------------
+-- MASTER HEARTBEAT & RENDERSTEPPED LOOPS
+------------------------------------------------------------------------------------------------
+RunService.Heartbeat:Connect(function(dt)
+	if not Character or not RootPart or not Humanoid or Humanoid.Health <= 0 then return end
+
+	State.LastVerticalSpeed = RootPart.AssemblyLinearVelocity.Y
+
+	if State.IsShielding then
+		State.WebFluid = math.max(0, State.WebFluid - CONFIG.Gadgets.WebShieldCostPerSec * dt)
+		if State.WebFluid <= 0 then
+			toggleWebShield(false)
+		end
+	else
+		local regen = CONFIG.Gadgets.FluidRegenRate * (State.IsSurgeActive and 4.0 or 1.0)
+		State.WebFluid = math.min(CONFIG.Gadgets.MaxWebFluid, State.WebFluid + regen * dt)
+	end
+
+	if State.IsSwinging then
+		updateSwingPhysics(dt)
+	elseif State.IsCrawling then
+		updateCrawlPhysics(dt)
+	elseif State.IsHanging then
+		updateWebHangPhysics(dt)
+	elseif State.IsGliding then
+		updateWebWingsPhysics(dt)
+	end
+
+	scanSpiderSense()
+	updateBuildingAnchorReticle()
+
+	if Sounds.AirWind then
+		local speed = RootPart.AssemblyLinearVelocity.Magnitude
+		local targetVol = clamp((speed - 38) / 85, 0, 0.72)
+		Sounds.AirWind.Volume = lerp(Sounds.AirWind.Volume, targetVol, clamp(dt * 8, 0, 1))
+		Sounds.AirWind.PlaybackSpeed = lerp(0.85, 1.35, clamp(speed / 120, 0, 1))
+	end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+	if not Character or not RootPart or not Camera then return end
+
+	local vel = RootPart.AssemblyLinearVelocity
+	local speed = vel.Magnitude
+
+	if SETTINGS.DynamicCameraFX then
+		local targetFOV = clamp(CONFIG.Camera.BaseFOV + (speed / 104) * (CONFIG.Camera.MaxFOV - CONFIG.Camera.BaseFOV), CONFIG.Camera.BaseFOV, CONFIG.Camera.MaxFOV)
+		Camera.FieldOfView = lerp(Camera.FieldOfView, targetFOV, clamp(dt * CONFIG.Camera.FOVLerpSpeed, 0, 1))
+
+		local targetRoll = 0
+		if State.IsSwinging or State.IsGliding then
+			local lateralSpeed = vel:Dot(Camera.CFrame.RightVector)
+			targetRoll = clamp(-lateralSpeed * 0.14, -CONFIG.Camera.MaxRollAngle, CONFIG.Camera.MaxRollAngle)
+		end
+		State.CurrentRoll = lerp(State.CurrentRoll, targetRoll, clamp(dt * CONFIG.Camera.RollLerpSpeed, 0, 1))
+		if math.abs(State.CurrentRoll) > 0.05 then
+			Camera.CFrame = Camera.CFrame * CFrame.Angles(0, 0, math.rad(State.CurrentRoll))
+		end
+
+		if State.ShakeIntensity > 0.01 then
+			local rx = (math.random() - 0.5) * 2 * State.ShakeIntensity
+			local ry = (math.random() - 0.5) * 2 * State.ShakeIntensity
+			Camera.CFrame = Camera.CFrame * CFrame.new(rx, ry, 0)
+			State.ShakeIntensity = math.max(0, State.ShakeIntensity - dt * 3.2)
+		end
+	else
+		Camera.FieldOfView = lerp(Camera.FieldOfView, CONFIG.Camera.BaseFOV, clamp(dt * 10, 0, 1))
+		State.CurrentRoll = 0
+		State.ShakeIntensity = 0
+	end
+
+	updateHUDVisuals(dt)
+end)
+
+------------------------------------------------------------------------------------------------
+-- INITIALIZATION
+------------------------------------------------------------------------------------------------
+if LocalPlayer.Character then
+	task.spawn(setupCharacter, LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(setupCharacter)
